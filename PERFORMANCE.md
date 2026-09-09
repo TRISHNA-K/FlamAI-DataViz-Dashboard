@@ -82,6 +82,30 @@ startTransition(() => {
 ```
 This guarantees user clicks, hovers, and canvas interactions remain immediately responsive (< 16ms latency).
 
+### 4. Zero-Intermediate-Allocation Ring Buffer Downsampling
+In high-frequency stress mode (e.g. 20ms ticks with 100,000 points), calling `buffer.toArray()` on every tick would allocate a new 100,000-element JavaScript array 50 times per second ($5,000,000$ references/sec) solely to downsample it to 1,500 points.
+**Our Solution**:
+- `SlidingDataBuffer` implements `downsampleMinMax(threshold)` and `downsampleLTTB(threshold)` directly over circular buffer index arithmetic: `(head + i) % capacity`.
+- Only the downsampled points ($\approx 1,500$) are ever allocated. The intermediate 100,000-element array is completely avoided.
+- Full raw array state synchronization for the virtual table is throttled to 100ms intervals, reducing memory allocation churn by **80%+**.
+
+### 5. Filter-then-Downsample Pipeline Correctness
+Downsampling operates strictly on the active filtered subset:
+```typescript
+// Filter first, then downsample:
+const syncRenderedData = useMemo(() => {
+  if (filteredData.length <= 1500) return filteredData;
+  return getDownsampledData(filteredData, 1500);
+}, [filteredData, getDownsampledData]);
+```
+If a user selects "Server A only", downsampling is evaluated exclusively over Server A records, ensuring 100% data correctness across all chart visualizers.
+
+### 6. True Web Worker Off-Thread Processing
+Heavy background computations are actively delegated to a dedicated Web Worker via `worker.postMessage`:
+- **Off-Thread Downsampling**: For datasets exceeding 3,000 points, `downsampleWithWorker` dispatches LTTB / MinMax processing off-thread with request ID correlation.
+- **Off-Thread Synthetic Generation**: Bursts (+2,000 points) and stress ticks are synthesized off-thread, completely insulating the UI thread from generation spikes.
+
+
 ---
 
 ## 🖼️ Canvas Rendering Architecture: Effect-Driven vs Always-Spinning RAF

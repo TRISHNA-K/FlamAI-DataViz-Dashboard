@@ -71,10 +71,15 @@ export function generateNextPoint(timestamp: number, forcedCategory?: CategoryTy
 /**
  * High-performance batch generation for initial datasets (e.g. 10,000 - 100,000 points)
  */
-export function generateInitialDataset(count: number = 10000, timeStepMs: number = 100): DataPoint[] {
+export function generateInitialDataset(
+  count: number = 10000,
+  timeStepMs: number = 100,
+  customStartTimestamp?: number
+): DataPoint[] {
   const points: DataPoint[] = new Array(count);
   const now = Date.now();
-  const startTimestamp = now - count * timeStepMs;
+  const startTimestamp =
+    customStartTimestamp !== undefined ? customStartTimestamp : now - count * timeStepMs;
 
   for (let i = 0; i < count; i++) {
     const timestamp = startTimestamp + i * timeStepMs;

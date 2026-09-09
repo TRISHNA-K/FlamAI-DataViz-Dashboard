@@ -204,6 +204,115 @@ export class SlidingDataBuffer {
     return result;
   }
 
+  public get(index: number): DataPoint {
+    if (index < 0 || index >= this.count) {
+      throw new RangeError(`Index out of bounds: ${index}, count: ${this.count}`);
+    }
+    if (this.count < this.capacity) {
+      return this.buffer[index];
+    }
+    return this.buffer[(this.head + index) % this.capacity];
+  }
+
+  /**
+   * Direct MinMax decimation reading directly from circular ring buffer.
+   * Eliminates the intermediate 100,000-element array allocation and GC pressure.
+   */
+  public downsampleMinMax(threshold: number): DataPoint[] {
+    const len = this.count;
+    if (len <= threshold) return this.toArray();
+
+    const result: DataPoint[] = [];
+    const numBuckets = Math.floor(threshold / 2);
+    const chunkSize = len / numBuckets;
+
+    for (let b = 0; b < numBuckets; b++) {
+      const start = Math.floor(b * chunkSize);
+      const end = Math.min(len, Math.floor((b + 1) * chunkSize));
+      if (start >= end) continue;
+
+      let minPt = this.get(start);
+      let maxPt = this.get(start);
+
+      for (let i = start + 1; i < end; i++) {
+        const pt = this.get(i);
+        if (pt.value < minPt.value) minPt = pt;
+        if (pt.value > maxPt.value) maxPt = pt;
+      }
+
+      if (minPt.timestamp < maxPt.timestamp) {
+        result.push(minPt);
+        if (minPt !== maxPt) result.push(maxPt);
+      } else {
+        result.push(maxPt);
+        if (minPt !== maxPt) result.push(minPt);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Direct LTTB downsampling reading directly from circular ring buffer.
+   * Eliminates the intermediate 100,000-element array allocation and GC pressure.
+   */
+  public downsampleLTTB(threshold: number): DataPoint[] {
+    const len = this.count;
+    if (threshold >= len || threshold <= 2) return this.toArray();
+
+    const sampled: DataPoint[] = [];
+    const bucketSize = (len - 2) / (threshold - 2);
+
+    let a = 0;
+    sampled.push(this.get(a));
+
+    for (let i = 0; i < threshold - 2; i++) {
+      let avgX = 0;
+      let avgY = 0;
+      let avgRangeStart = Math.floor((i + 1) * bucketSize) + 1;
+      let avgRangeEnd = Math.floor((i + 2) * bucketSize) + 1;
+      avgRangeEnd = avgRangeEnd < len ? avgRangeEnd : len;
+
+      const avgRangeLength = avgRangeEnd - avgRangeStart;
+      for (let idx = avgRangeStart; idx < avgRangeEnd; idx++) {
+        const pt = this.get(idx);
+        avgX += pt.timestamp;
+        avgY += pt.value;
+      }
+      avgX /= avgRangeLength || 1;
+      avgY /= avgRangeLength || 1;
+
+      const rangeOffs = Math.floor(i * bucketSize) + 1;
+      const rangeTo = Math.floor((i + 1) * bucketSize) + 1;
+
+      const ptA = this.get(a);
+      const pointAX = ptA.timestamp;
+      const pointAY = ptA.value;
+
+      let maxArea = -1;
+      let nextA = rangeOffs;
+
+      for (let idx = rangeOffs; idx < rangeTo; idx++) {
+        const ptIdx = this.get(idx);
+        const area = Math.abs(
+          (pointAX - avgX) * (ptIdx.value - pointAY) -
+          (pointAX - ptIdx.timestamp) * (avgY - pointAY)
+        ) * 0.5;
+
+        if (area > maxArea) {
+          maxArea = area;
+          nextA = idx;
+        }
+      }
+
+      sampled.push(this.get(nextA));
+      a = nextA;
+    }
+
+    sampled.push(this.get(len - 1));
+    return sampled;
+  }
+
   public get size(): number {
     return this.count;
   }

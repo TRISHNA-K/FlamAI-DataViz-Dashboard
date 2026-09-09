@@ -6,16 +6,23 @@ self.onmessage = function (e) {
 
   switch (type) {
     case 'DOWNSAMPLE_LTTB': {
-      const { data, threshold } = payload;
+      const { data, threshold, reqId } = payload;
       const result = lttb(data, threshold);
-      self.postMessage({ type: 'DOWNSAMPLE_LTTB_RESULT', payload: result });
+      self.postMessage({ type: 'DOWNSAMPLE_LTTB_RESULT', payload: result, reqId });
+      break;
+    }
+
+    case 'DOWNSAMPLE_MINMAX': {
+      const { data, threshold, reqId } = payload;
+      const result = minMax(data, threshold);
+      self.postMessage({ type: 'DOWNSAMPLE_MINMAX_RESULT', payload: result, reqId });
       break;
     }
 
     case 'AGGREGATE_TIME': {
-      const { data, period } = payload;
+      const { data, period, reqId } = payload;
       const result = aggregate(data, period);
-      self.postMessage({ type: 'AGGREGATE_TIME_RESULT', payload: result });
+      self.postMessage({ type: 'AGGREGATE_TIME_RESULT', payload: result, reqId });
       break;
     }
 
@@ -30,6 +37,38 @@ self.onmessage = function (e) {
       break;
   }
 };
+
+function minMax(data, threshold) {
+  const len = data.length;
+  if (threshold >= len || threshold <= 4) return data;
+
+  const sampled = [];
+  const numBuckets = Math.floor(threshold / 2);
+  const bucketSize = Math.floor(len / numBuckets);
+
+  for (let b = 0; b < numBuckets; b++) {
+    const start = b * bucketSize;
+    const end = b === numBuckets - 1 ? len : start + bucketSize;
+
+    let minIdx = start;
+    let maxIdx = start;
+
+    for (let i = start + 1; i < end; i++) {
+      if (data[i].value < data[minIdx].value) minIdx = i;
+      if (data[i].value > data[maxIdx].value) maxIdx = i;
+    }
+
+    if (minIdx < maxIdx) {
+      sampled.push(data[minIdx], data[maxIdx]);
+    } else if (minIdx > maxIdx) {
+      sampled.push(data[maxIdx], data[minIdx]);
+    } else {
+      sampled.push(data[minIdx]);
+    }
+  }
+
+  return sampled;
+}
 
 function lttb(data, threshold) {
   const len = data.length;

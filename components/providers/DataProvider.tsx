@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useMemo, useTransition, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useTransition, useCallback } from 'react';
 import {
   AggregatedBucket,
   AggregationPeriod,
@@ -70,6 +70,7 @@ export function DataProvider({ children, initialData }: DataProviderProps) {
   const {
     data: allData,
     getDownsampledData,
+    downsampleWithWorker,
     aggregation,
     setAggregation,
     config: streamingConfig,
@@ -144,11 +145,37 @@ export function DataProvider({ children, initialData }: DataProviderProps) {
     });
   }, [allData, filter, timeRange]);
 
-  // Downsample filtered data for visual charts to maintain 60 FPS
-  const renderedData = useMemo(() => {
+  // Web Worker assisted downsampling state for heavy datasets (> 3000 pts)
+  const [workerRenderedData, setWorkerRenderedData] = useState<DataPoint[] | null>(null);
+
+  // Synchronous downsampling calculation (instantaneous paint & fallback)
+  const syncRenderedData = useMemo(() => {
     if (filteredData.length <= 1500) return filteredData;
-    return getDownsampledData(1500);
+    // Strictly downsamples the filtered subset (Server A, custom range, etc.)
+    return getDownsampledData(filteredData, 1500);
   }, [filteredData, getDownsampledData]);
+
+  // Offload heavy LTTB / MinMax calculation to background Web Worker
+  useEffect(() => {
+    if (filteredData.length > 3000) {
+      let isCurrent = true;
+      const algo = filteredData.length > 30000 ? 'minmax' : 'lttb';
+      downsampleWithWorker(filteredData, 1500, algo).then((result) => {
+        if (isCurrent && result && result.length > 0) {
+          setWorkerRenderedData(result);
+        }
+      });
+      return () => {
+        isCurrent = false;
+      };
+    } else {
+      setWorkerRenderedData(null);
+    }
+  }, [filteredData, downsampleWithWorker]);
+
+  // Use worker downsampled data when available, falling back to sync calculation
+  const renderedData =
+    workerRenderedData && workerRenderedData.length > 0 ? workerRenderedData : syncRenderedData;
 
   // Aggregated data when aggregation mode is active
   const aggregatedData = useMemo(() => {

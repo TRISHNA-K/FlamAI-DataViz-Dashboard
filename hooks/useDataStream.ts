@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useTransition } from 'react';
 import { AggregationPeriod, DataPoint, StreamingConfig } from '@/lib/types';
 import { generateInitialDataset, generateStreamBatch } from '@/lib/dataGenerator';
-import { SlidingDataBuffer, lttbDownsample, minMaxDownsample, aggregateByTimePeriod } from '@/lib/performanceUtils';
+import { SlidingDataBuffer, lttbDownsample, minMaxDownsample } from '@/lib/performanceUtils';
 
 interface UseDataStreamOptions {
   initialData?: DataPoint[];
@@ -42,13 +42,15 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
     }
   }
 
-  // React state for points snapshot
+  // React state for points snapshot (consumed by virtual table and components)
   const [dataPoints, setDataPoints] = useState<DataPoint[]>(() => {
     return bufferRef.current ? bufferRef.current.toArray() : [];
   });
 
-  // Web Worker ref
+  // Web Worker ref and pending request map for off-thread downsampling
   const workerRef = useRef<Worker | null>(null);
+  const pendingRequestsRef = useRef<Map<number, (data: DataPoint[]) => void>>(new Map());
+  const requestIdRef = useRef<number>(0);
 
   // Initialize Web Worker
   useEffect(() => {
@@ -57,12 +59,23 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
         const worker = new Worker('/workers/dataWorker.js');
         workerRef.current = worker;
 
-        worker.onmessage = (e) => {
-          const { type, payload } = e.data;
+        worker.onmessage = (e: MessageEvent) => {
+          const { type, payload, reqId } = e.data;
+
           if (type === 'GENERATE_BATCH_RESULT') {
-            if (bufferRef.current) {
+            if (bufferRef.current && Array.isArray(payload) && payload.length > 0) {
               bufferRef.current.pushBatch(payload);
+              latestTimestampRef.current = payload[payload.length - 1].timestamp;
               setDataPoints(bufferRef.current.toArray());
+            }
+          } else if (
+            (type === 'DOWNSAMPLE_LTTB_RESULT' || type === 'DOWNSAMPLE_MINMAX_RESULT') &&
+            reqId !== undefined
+          ) {
+            const resolver = pendingRequestsRef.current.get(reqId);
+            if (resolver) {
+              pendingRequestsRef.current.delete(reqId);
+              resolver(payload);
             }
           }
         };
@@ -70,6 +83,7 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
         return () => {
           worker.terminate();
           workerRef.current = null;
+          pendingRequestsRef.current.clear();
         };
       } catch (err) {
         console.warn('Web Worker initialization fallback to main thread:', err);
@@ -83,6 +97,9 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
       ? initialData[initialData.length - 1].timestamp
       : Date.now()
   );
+
+  // Ref tracking timestamp of last raw array state synchronization
+  const lastStateSyncRef = useRef<number>(0);
 
   // Streaming timer loop - depends strictly on configuration, not on data array
   useEffect(() => {
@@ -99,12 +116,25 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
       bufferRef.current.pushBatch(newPoints);
 
       // If array exceeds targetPointCount, trim to targetPointCount
-      const currentArray = bufferRef.current.toArray();
-      if (currentArray.length > config.targetPointCount) {
+      if (bufferRef.current.size > config.targetPointCount) {
         bufferRef.current.setCapacity(config.targetPointCount);
       }
 
-      setDataPoints(bufferRef.current.toArray());
+      // Optimize GC pressure:
+      // In standard 100ms streaming with 10k points, updating toArray() directly is smooth.
+      // In high-frequency stress mode (e.g. 20ms with 50k-100k points), copying 100k array every 20ms
+      // creates excessive GC churn for the table. We throttle full raw array conversion to 100ms intervals,
+      // while keeping bufferRef.current fully updated in real-time.
+      const now = Date.now();
+      const shouldSyncState =
+        !config.stressMode ||
+        config.intervalMs >= 100 ||
+        now - lastStateSyncRef.current >= 80;
+
+      if (shouldSyncState) {
+        lastStateSyncRef.current = now;
+        setDataPoints(bufferRef.current.toArray());
+      }
     }, config.intervalMs);
 
     return () => clearInterval(intervalId);
@@ -129,7 +159,9 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
         const startTs = currentData.length > 0
           ? currentData[0].timestamp - needed * 100
           : Date.now() - count * 100;
-        const additional = generateInitialDataset(needed, 100);
+        
+        // Pass startTs to connect timestamps continuously
+        const additional = generateInitialDataset(needed, 100, startTs);
         
         bufferRef.current.setCapacity(count);
         bufferRef.current.pushBatch([...additional, ...currentData]);
@@ -150,12 +182,25 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
     setConfig((prev) => ({ ...prev, isRunning: !prev.isRunning }));
   }, []);
 
+  // Offload burst point generation to Web Worker when available
   const injectBurst = useCallback((burstSize: number = 1000) => {
-    if (!bufferRef.current) return;
-    const burst = generateStreamBatch(burstSize, latestTimestampRef.current);
-    latestTimestampRef.current = burst[burst.length - 1].timestamp;
-    bufferRef.current.pushBatch(burst);
-    setDataPoints(bufferRef.current.toArray());
+    if (workerRef.current) {
+      // Actively delegate heavy synthetic generation to dedicated background worker thread
+      workerRef.current.postMessage({
+        type: 'GENERATE_BATCH',
+        payload: {
+          count: burstSize,
+          startTimestamp: latestTimestampRef.current,
+          timeStepMs: 100,
+        },
+      });
+    } else {
+      if (!bufferRef.current) return;
+      const burst = generateStreamBatch(burstSize, latestTimestampRef.current);
+      latestTimestampRef.current = burst[burst.length - 1].timestamp;
+      bufferRef.current.pushBatch(burst);
+      setDataPoints(bufferRef.current.toArray());
+    }
   }, []);
 
   const injectCustomPoints = useCallback((points: DataPoint[]) => {
@@ -174,20 +219,77 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
     }
   }, [config.targetPointCount]);
 
-  // Rendered downsampled dataset for display (maintains visual peak fidelity at 60fps)
-  const getDownsampledData = useCallback((threshold: number = 1500): DataPoint[] => {
-    if (dataPoints.length <= threshold) return dataPoints;
-    if (dataPoints.length > 30000) {
-      // For massive 30k-100k points, use ultra-fast MinMax decimation (< 2ms)
-      return minMaxDownsample(dataPoints, threshold);
-    }
-    // For 10k-30k points, use LTTB
-    return lttbDownsample(dataPoints, threshold);
-  }, [dataPoints]);
+  /**
+   * Synchronous downsampling algorithm.
+   * If sourceData (e.g. filteredData) is passed, downsamples sourceData.
+   * If omitted, downsamples directly from circular ring buffer without allocating intermediate arrays.
+   */
+  const getDownsampledData = useCallback(
+    (sourceData?: DataPoint[], threshold: number = 1500): DataPoint[] => {
+      if (sourceData) {
+        if (sourceData.length <= threshold) return sourceData;
+        if (sourceData.length > 30000) {
+          return minMaxDownsample(sourceData, threshold);
+        }
+        return lttbDownsample(sourceData, threshold);
+      }
+
+      if (bufferRef.current) {
+        if (bufferRef.current.size <= threshold) {
+          return bufferRef.current.toArray();
+        }
+        if (bufferRef.current.size > 30000) {
+          return bufferRef.current.downsampleMinMax(threshold);
+        }
+        return bufferRef.current.downsampleLTTB(threshold);
+      }
+
+      return [];
+    },
+    []
+  );
+
+  /**
+   * Dedicated off-thread Web Worker downsampling method.
+   * Dispatches heavy LTTB / MinMax calculation to background worker thread.
+   */
+  const downsampleWithWorker = useCallback(
+    (
+      data: DataPoint[],
+      threshold: number = 1500,
+      algorithm: 'lttb' | 'minmax' = 'lttb'
+    ): Promise<DataPoint[]> => {
+      return new Promise((resolve) => {
+        if (!workerRef.current || data.length <= threshold) {
+          resolve(getDownsampledData(data, threshold));
+          return;
+        }
+
+        const reqId = ++requestIdRef.current;
+        pendingRequestsRef.current.set(reqId, resolve);
+
+        workerRef.current.postMessage({
+          type: algorithm === 'minmax' ? 'DOWNSAMPLE_MINMAX' : 'DOWNSAMPLE_LTTB',
+          payload: { data, threshold, reqId },
+        });
+
+        // Safety timeout fallback (300ms)
+        setTimeout(() => {
+          if (pendingRequestsRef.current.has(reqId)) {
+            pendingRequestsRef.current.delete(reqId);
+            resolve(getDownsampledData(data, threshold));
+          }
+        }, 300);
+      });
+    },
+    [getDownsampledData]
+  );
 
   return {
     data: dataPoints,
+    bufferRef,
     getDownsampledData,
+    downsampleWithWorker,
     aggregation,
     setAggregation,
     config,

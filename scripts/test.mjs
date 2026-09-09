@@ -53,6 +53,107 @@ class SlidingDataBuffer {
       : currentItems;
     this.pushBatch(slice);
   }
+
+  get(index) {
+    if (index < 0 || index >= this.count) {
+      throw new RangeError(`Index out of bounds: ${index}`);
+    }
+    if (this.count < this.capacity) {
+      return this.buffer[index];
+    }
+    return this.buffer[(this.head + index) % this.capacity];
+  }
+
+  downsampleMinMax(threshold) {
+    const len = this.count;
+    if (len <= threshold) return this.toArray();
+
+    const result = [];
+    const numBuckets = Math.floor(threshold / 2);
+    const chunkSize = len / numBuckets;
+
+    for (let b = 0; b < numBuckets; b++) {
+      const start = Math.floor(b * chunkSize);
+      const end = Math.min(len, Math.floor((b + 1) * chunkSize));
+      if (start >= end) continue;
+
+      let minPt = this.get(start);
+      let maxPt = this.get(start);
+
+      for (let i = start + 1; i < end; i++) {
+        const pt = this.get(i);
+        if (pt.value < minPt.value) minPt = pt;
+        if (pt.value > maxPt.value) maxPt = pt;
+      }
+
+      if (minPt.timestamp < maxPt.timestamp) {
+        result.push(minPt);
+        if (minPt !== maxPt) result.push(maxPt);
+      } else {
+        result.push(maxPt);
+        if (minPt !== maxPt) result.push(minPt);
+      }
+    }
+
+    return result;
+  }
+
+  downsampleLTTB(threshold) {
+    const len = this.count;
+    if (threshold >= len || threshold <= 2) return this.toArray();
+
+    const sampled = [];
+    const bucketSize = (len - 2) / (threshold - 2);
+
+    let a = 0;
+    sampled.push(this.get(a));
+
+    for (let i = 0; i < threshold - 2; i++) {
+      let avgX = 0;
+      let avgY = 0;
+      let avgRangeStart = Math.floor((i + 1) * bucketSize) + 1;
+      let avgRangeEnd = Math.floor((i + 2) * bucketSize) + 1;
+      avgRangeEnd = avgRangeEnd < len ? avgRangeEnd : len;
+
+      const avgRangeLength = avgRangeEnd - avgRangeStart;
+      for (let idx = avgRangeStart; idx < avgRangeEnd; idx++) {
+        const pt = this.get(idx);
+        avgX += pt.timestamp;
+        avgY += pt.value;
+      }
+      avgX /= avgRangeLength || 1;
+      avgY /= avgRangeLength || 1;
+
+      const rangeOffs = Math.floor(i * bucketSize) + 1;
+      const rangeTo = Math.floor((i + 1) * bucketSize) + 1;
+
+      const ptA = this.get(a);
+      const pointAX = ptA.timestamp;
+      const pointAY = ptA.value;
+
+      let maxArea = -1;
+      let nextA = rangeOffs;
+
+      for (let idx = rangeOffs; idx < rangeTo; idx++) {
+        const ptIdx = this.get(idx);
+        const area = Math.abs(
+          (pointAX - avgX) * (ptIdx.value - pointAY) -
+          (pointAX - ptIdx.timestamp) * (avgY - pointAY)
+        ) * 0.5;
+
+        if (area > maxArea) {
+          maxArea = area;
+          nextA = idx;
+        }
+      }
+
+      sampled.push(this.get(nextA));
+      a = nextA;
+    }
+
+    sampled.push(this.get(len - 1));
+    return sampled;
+  }
 }
 
 function lttbDownsample(data, threshold) {
@@ -325,6 +426,38 @@ describe('SlidingDataBuffer (Ring Buffer / Zero-GC)', () => {
     ring.setCapacity(3);
     assert.equal(ring.size, 3);
     assert.deepEqual(ring.toArray().map((p) => p.val), [4, 5, 6]);
+  });
+
+  it('performs direct zero-allocation MinMax and LTTB downsampling from ring buffer', () => {
+    const ring = new SlidingDataBuffer(1000);
+    const testPoints = generateTestPoints(1000, 100);
+    ring.pushBatch(testPoints);
+
+    const minMaxSampled = ring.downsampleMinMax(100);
+    assert.ok(minMaxSampled.length <= 100);
+    assert.ok(minMaxSampled.length >= 50);
+
+    const lttbSampled = ring.downsampleLTTB(100);
+    assert.equal(lttbSampled.length, 100);
+    assert.equal(lttbSampled[0].timestamp, testPoints[0].timestamp);
+    assert.equal(lttbSampled[lttbSampled.length - 1].timestamp, testPoints[testPoints.length - 1].timestamp);
+  });
+});
+
+describe('Filter-then-Downsample Correctness', () => {
+  it('strictly downsamples only filtered categories (e.g. Server A only)', () => {
+    const rawPoints = generateTestPoints(4000, 100); // Has Server A, B, C, D
+    // Filter to Server A only
+    const filtered = rawPoints.filter((p) => p.category === 'Server A');
+    assert.equal(filtered.length, 1000);
+
+    // Downsample the filtered subset
+    const downsampled = lttbDownsample(filtered, 200);
+    assert.equal(downsampled.length, 200);
+
+    // Every single downsampled point must strictly belong to Server A
+    const allServerA = downsampled.every((p) => p.category === 'Server A');
+    assert.equal(allServerA, true, 'Downsampled points must strictly originate from filtered category');
   });
 });
 
