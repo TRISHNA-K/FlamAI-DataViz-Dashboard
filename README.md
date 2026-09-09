@@ -27,11 +27,15 @@ npm run start
 
 Open [http://localhost:3000](http://localhost:3000) in your browser. The root path automatically redirects to `/dashboard`.
 
-### 3. Run Automated Benchmarks
+### 3. Run Automated Benchmarks & Tests
 ```bash
+# Run standalone algorithm benchmarks (LTTB, MinMax, Spatial Grid, GBM)
 npm run benchmark
+
+# Run automated unit test suite (LTTB decimation, Ring Buffer, Spatial Index)
+npm test
 ```
-Executes the reproducible performance suite measuring GBM generator throughput, LTTB downsampling speed, MinMax decimation time, and $O(1)$ spatial grid search latency.
+
 
 ---
 
@@ -110,6 +114,7 @@ performance-dashboard/
 │   └── page.tsx                  # Root redirect to /dashboard
 ├── components/
 │   ├── Dashboard.tsx             # Client dashboard shell with Suspense boundaries & mount safety
+│   ├── DashboardServerInsights.tsx # Async Server Component streaming fleet statistics via Suspense
 │   ├── charts/
 │   │   ├── BarChart.tsx          # React.memo Canvas histogram & aggregation bin visualizer
 │   │   ├── Heatmap.tsx           # React.memo Canvas 2D temporal density matrix
@@ -139,7 +144,9 @@ performance-dashboard/
 │   └── workers/
 │       └── dataWorker.js         # Dedicated Web Worker for off-thread processing
 ├── scripts/
-│   └── benchmark.mjs             # Standalone reproducible benchmark test suite
+│   ├── benchmark.mjs             # Standalone reproducible benchmark test suite
+│   └── test.mjs                  # Automated unit test suite (LTTB, MinMax, Spatial Grid)
+
 ├── next.config.js                # SWC optimization, redirects, standalone output
 ├── package.json
 ├── tailwind.config.ts
