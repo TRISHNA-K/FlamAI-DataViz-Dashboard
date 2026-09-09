@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: false, // Disabling duplicate mounts in development helps canvas performance profiling
+  reactStrictMode: true,
   swcMinify: true,
   output: 'standalone',
   async redirects() {

@@ -32,6 +32,7 @@ export interface PerformanceMetrics {
   frameTime: number; // ms per frame
   memoryUsage: number; // MB used heap
   heapLimit: number; // MB heap limit
+  isMemoryEstimated?: boolean;
   renderTime: number; // ms
   dataProcessingTime: number; // ms
   totalPoints: number;

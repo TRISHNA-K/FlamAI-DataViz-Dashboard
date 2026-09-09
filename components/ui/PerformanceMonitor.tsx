@@ -221,10 +221,18 @@ function PerformanceMonitor() {
                         {metrics.memoryUsage}
                       </span>
                       <span className="text-[10px] text-slate-400">MB</span>
+                      {metrics.isMemoryEstimated && (
+                        <span
+                          className="text-[9px] text-amber-400 font-normal ml-1"
+                          title="Browser hides performance.memory; showing estimated baseline"
+                        >
+                          (est)
+                        </span>
+                      )}
                     </div>
                     <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
                       <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                      <span>Zero-GC Ring Buffer</span>
+                      <span>{metrics.isMemoryEstimated ? 'Estimated Heap' : 'Zero-GC Ring Buffer'}</span>
                     </div>
                   </div>
 

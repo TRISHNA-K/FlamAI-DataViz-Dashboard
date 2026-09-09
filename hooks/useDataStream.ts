@@ -51,6 +51,7 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
   const workerRef = useRef<Worker | null>(null);
   const pendingRequestsRef = useRef<Map<number, (data: DataPoint[]) => void>>(new Map());
   const requestIdRef = useRef<number>(0);
+  const [isWorkerActive, setIsWorkerActive] = useState(false);
 
   // Initialize Web Worker
   useEffect(() => {
@@ -58,6 +59,7 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
       try {
         const worker = new Worker('/workers/dataWorker.js');
         workerRef.current = worker;
+        setIsWorkerActive(true);
 
         worker.onmessage = (e: MessageEvent) => {
           const { type, payload, reqId } = e.data;
@@ -66,7 +68,21 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
             if (bufferRef.current && Array.isArray(payload) && payload.length > 0) {
               bufferRef.current.pushBatch(payload);
               latestTimestampRef.current = payload[payload.length - 1].timestamp;
-              setDataPoints(bufferRef.current.toArray());
+
+              if (bufferRef.current.size > config.targetPointCount) {
+                bufferRef.current.setCapacity(config.targetPointCount);
+              }
+
+              const now = Date.now();
+              const shouldSyncState =
+                !config.stressMode ||
+                config.intervalMs >= 100 ||
+                now - lastStateSyncRef.current >= 80;
+
+              if (shouldSyncState) {
+                lastStateSyncRef.current = now;
+                setDataPoints(bufferRef.current.toArray());
+              }
             }
           } else if (
             (type === 'DOWNSAMPLE_LTTB_RESULT' || type === 'DOWNSAMPLE_MINMAX_RESULT') &&
@@ -80,16 +96,23 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
           }
         };
 
+        worker.onerror = (err) => {
+          console.warn('Web Worker encountered an error, using main thread fallback:', err);
+          setIsWorkerActive(false);
+        };
+
         return () => {
           worker.terminate();
           workerRef.current = null;
+          setIsWorkerActive(false);
           pendingRequestsRef.current.clear();
         };
       } catch (err) {
         console.warn('Web Worker initialization fallback to main thread:', err);
+        setIsWorkerActive(false);
       }
     }
-  }, []);
+  }, [config.stressMode, config.intervalMs, config.targetPointCount]);
 
   // Ref tracking latest timestamp to prevent re-creating setInterval on every tick
   const latestTimestampRef = useRef<number>(
@@ -110,30 +133,39 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
 
       // Generate points advancing from the tracked latest timestamp
       const pointsToGenerate = config.stressMode ? Math.max(5, config.batchSize * 5) : config.batchSize;
-      const newPoints = generateStreamBatch(pointsToGenerate, latestTimestampRef.current);
-      latestTimestampRef.current = newPoints[newPoints.length - 1].timestamp;
 
-      bufferRef.current.pushBatch(newPoints);
+      if (workerRef.current) {
+        // Offload real-time batch generation to background Web Worker thread
+        workerRef.current.postMessage({
+          type: 'GENERATE_BATCH',
+          payload: {
+            count: pointsToGenerate,
+            startTimestamp: latestTimestampRef.current,
+            timeStepMs: 100,
+          },
+        });
+      } else {
+        // Synchronous fallback when Web Worker is not available
+        const newPoints = generateStreamBatch(pointsToGenerate, latestTimestampRef.current);
+        latestTimestampRef.current = newPoints[newPoints.length - 1].timestamp;
 
-      // If array exceeds targetPointCount, trim to targetPointCount
-      if (bufferRef.current.size > config.targetPointCount) {
-        bufferRef.current.setCapacity(config.targetPointCount);
-      }
+        bufferRef.current.pushBatch(newPoints);
 
-      // Optimize GC pressure:
-      // In standard 100ms streaming with 10k points, updating toArray() directly is smooth.
-      // In high-frequency stress mode (e.g. 20ms with 50k-100k points), copying 100k array every 20ms
-      // creates excessive GC churn for the table. We throttle full raw array conversion to 100ms intervals,
-      // while keeping bufferRef.current fully updated in real-time.
-      const now = Date.now();
-      const shouldSyncState =
-        !config.stressMode ||
-        config.intervalMs >= 100 ||
-        now - lastStateSyncRef.current >= 80;
+        // If array exceeds targetPointCount, trim to targetPointCount
+        if (bufferRef.current.size > config.targetPointCount) {
+          bufferRef.current.setCapacity(config.targetPointCount);
+        }
 
-      if (shouldSyncState) {
-        lastStateSyncRef.current = now;
-        setDataPoints(bufferRef.current.toArray());
+        const now = Date.now();
+        const shouldSyncState =
+          !config.stressMode ||
+          config.intervalMs >= 100 ||
+          now - lastStateSyncRef.current >= 80;
+
+        if (shouldSyncState) {
+          lastStateSyncRef.current = now;
+          setDataPoints(bufferRef.current.toArray());
+        }
       }
     }, config.intervalMs);
 
@@ -290,6 +322,7 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
     bufferRef,
     getDownsampledData,
     downsampleWithWorker,
+    isWorkerActive,
     aggregation,
     setAggregation,
     config,

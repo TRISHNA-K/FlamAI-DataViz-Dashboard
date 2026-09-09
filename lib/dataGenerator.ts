@@ -4,25 +4,32 @@ const CATEGORIES: CategoryType[] = ['Server A', 'Server B', 'Server C', 'Server 
 const REGIONS = ['us-east-1', 'us-west-2', 'eu-central-1', 'ap-southeast-1'];
 
 // Internal state for continuous Brownian drift per category
-interface CategoryState {
+export interface CategoryState {
   currentValue: number;
   trend: number;
   volatility: number;
 }
 
-const categoryStates: Record<CategoryType, CategoryState> = {
-  'Server A': { currentValue: 120, trend: 0.05, volatility: 3.5 },
-  'Server B': { currentValue: 85, trend: -0.02, volatility: 2.8 },
-  'Server C': { currentValue: 210, trend: 0.08, volatility: 5.2 },
-  'Server D': { currentValue: 155, trend: -0.04, volatility: 4.1 },
-};
+export function createInitialCategoryStates(): Record<CategoryType, CategoryState> {
+  return {
+    'Server A': { currentValue: 120, trend: 0.05, volatility: 3.5 },
+    'Server B': { currentValue: 85, trend: -0.02, volatility: 2.8 },
+    'Server C': { currentValue: 210, trend: 0.08, volatility: 5.2 },
+    'Server D': { currentValue: 155, trend: -0.04, volatility: 4.1 },
+  };
+}
 
 /**
  * Generate a single realistic data point
  */
-export function generateNextPoint(timestamp: number, forcedCategory?: CategoryType): DataPoint {
+export function generateNextPoint(
+  timestamp: number,
+  forcedCategory?: CategoryType,
+  states?: Record<CategoryType, CategoryState>
+): DataPoint {
   const category = forcedCategory || CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
-  const state = categoryStates[category];
+  const stateMap = states || createInitialCategoryStates();
+  const state = stateMap[category];
 
   // Brownian motion with mean reversion
   const meanReversion = (150 - state.currentValue) * 0.02;
@@ -74,8 +81,10 @@ export function generateNextPoint(timestamp: number, forcedCategory?: CategoryTy
 export function generateInitialDataset(
   count: number = 10000,
   timeStepMs: number = 100,
-  customStartTimestamp?: number
+  customStartTimestamp?: number,
+  scopedStates?: Record<CategoryType, CategoryState>
 ): DataPoint[] {
+  const states = scopedStates || createInitialCategoryStates();
   const points: DataPoint[] = new Array(count);
   const now = Date.now();
   const startTimestamp =
@@ -84,7 +93,7 @@ export function generateInitialDataset(
   for (let i = 0; i < count; i++) {
     const timestamp = startTimestamp + i * timeStepMs;
     const category = CATEGORIES[i % CATEGORIES.length];
-    points[i] = generateNextPoint(timestamp, category);
+    points[i] = generateNextPoint(timestamp, category, states);
   }
 
   return points;
@@ -93,13 +102,18 @@ export function generateInitialDataset(
 /**
  * Generate a batch of streaming points for real-time ticks
  */
-export function generateStreamBatch(count: number = 1, currentLatestTimestamp?: number): DataPoint[] {
+export function generateStreamBatch(
+  count: number = 1,
+  currentLatestTimestamp?: number,
+  scopedStates?: Record<CategoryType, CategoryState>
+): DataPoint[] {
+  const states = scopedStates || createInitialCategoryStates();
   const points: DataPoint[] = [];
   const baseTime = currentLatestTimestamp ? currentLatestTimestamp + 100 : Date.now();
 
   for (let i = 0; i < count; i++) {
     const timestamp = baseTime + i * 100;
-    points.push(generateNextPoint(timestamp));
+    points.push(generateNextPoint(timestamp, undefined, states));
   }
 
   return points;

@@ -14,7 +14,7 @@ import {
 } from '@/lib/types';
 import { useDataStream } from '@/hooks/useDataStream';
 import { usePerformanceMonitor } from '@/hooks/usePerformanceMonitor';
-import { aggregateByTimePeriod } from '@/lib/performanceUtils';
+import { aggregateByTimePeriod, lttbDownsample, minMaxDownsample } from '@/lib/performanceUtils';
 
 interface DataContextType {
   // Data
@@ -23,6 +23,7 @@ interface DataContextType {
   renderedData: DataPoint[];
   aggregatedData: AggregatedBucket[];
   downsampleWithWorker: (data: DataPoint[], threshold?: number, algorithm?: 'lttb' | 'minmax') => Promise<DataPoint[]>;
+  isWorkerActive: boolean;
   
   // Streaming & Config
   streamingConfig: StreamingConfig;
@@ -72,6 +73,7 @@ export function DataProvider({ children, initialData }: DataProviderProps) {
     data: allData,
     getDownsampledData,
     downsampleWithWorker,
+    isWorkerActive,
     aggregation,
     setAggregation,
     config: streamingConfig,
@@ -219,12 +221,14 @@ export function DataProvider({ children, initialData }: DataProviderProps) {
   // Web Worker assisted downsampling state for heavy datasets (> 3000 pts)
   const [workerRenderedData, setWorkerRenderedData] = useState<DataPoint[] | null>(null);
 
-  // Synchronous downsampling calculation (instantaneous paint & fallback)
+  // Pure synchronous downsampling calculation strictly over filteredData
   const syncRenderedData = useMemo(() => {
     if (filteredData.length <= 1500) return filteredData;
-    // Strictly downsamples the filtered subset (Server A, custom range, etc.)
-    return getDownsampledData(filteredData, 1500);
-  }, [filteredData, getDownsampledData]);
+    if (filteredData.length > 30000) {
+      return minMaxDownsample(filteredData, 1500);
+    }
+    return lttbDownsample(filteredData, 1500);
+  }, [filteredData]);
 
   // Offload heavy LTTB / MinMax calculation to background Web Worker
   useEffect(() => {
@@ -309,6 +313,7 @@ export function DataProvider({ children, initialData }: DataProviderProps) {
       renderedData,
       aggregatedData,
       downsampleWithWorker,
+      isWorkerActive,
       streamingConfig,
       toggleStreaming,
       setIntervalMs,
@@ -338,6 +343,7 @@ export function DataProvider({ children, initialData }: DataProviderProps) {
       renderedData,
       aggregatedData,
       downsampleWithWorker,
+      isWorkerActive,
       streamingConfig,
       toggleStreaming,
       setIntervalMs,

@@ -102,16 +102,19 @@ export function usePerformanceMonitor(totalPoints: number = 0, renderedPoints: n
         // Memory inspection (Chrome / Chromium specific API)
         let memUsage = 0;
         let memLimit = 0;
+        let isEstimated = false;
         const perfWithMemory = performance as unknown as {
           memory?: { usedJSHeapSize: number; jsHeapSizeLimit: number; totalJSHeapSize: number };
         };
         if (perfWithMemory.memory) {
           memUsage = Math.round((perfWithMemory.memory.usedJSHeapSize / (1024 * 1024)) * 10) / 10;
           memLimit = Math.round((perfWithMemory.memory.jsHeapSizeLimit / (1024 * 1024)) * 10) / 10;
+          isEstimated = false;
         } else {
-          // Simulated baseline for browsers that hide memory details for privacy
+          // Estimated baseline for browsers (Firefox/Safari) that hide memory details for privacy
           memUsage = Math.round((35 + (totalPoints / 10000) * 8 + Math.sin(now / 5000) * 2) * 10) / 10;
           memLimit = 2048;
+          isEstimated = true;
         }
 
         setMetrics({
@@ -122,6 +125,7 @@ export function usePerformanceMonitor(totalPoints: number = 0, renderedPoints: n
           frameTime: Math.round(delta * 10) / 10,
           memoryUsage: memUsage,
           heapLimit: memLimit,
+          isMemoryEstimated: isEstimated,
           renderTime: Math.round(lastRecordedRenderTimeRef.current * 10) / 10,
           dataProcessingTime: Math.round(lastRecordedProcessingTimeRef.current * 10) / 10,
           totalPoints,

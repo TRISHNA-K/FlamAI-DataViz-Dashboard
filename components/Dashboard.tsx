@@ -1,10 +1,13 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import LineChart from '@/components/charts/LineChart';
-import ScatterPlot from '@/components/charts/ScatterPlot';
-import BarChart from '@/components/charts/BarChart';
-import Heatmap from '@/components/charts/Heatmap';
+import dynamic from 'next/dynamic';
+
+const LineChart = dynamic(() => import('@/components/charts/LineChart'), { ssr: false });
+const ScatterPlot = dynamic(() => import('@/components/charts/ScatterPlot'), { ssr: false });
+const BarChart = dynamic(() => import('@/components/charts/BarChart'), { ssr: false });
+const Heatmap = dynamic(() => import('@/components/charts/Heatmap'), { ssr: false });
+
 import FilterPanel from '@/components/controls/FilterPanel';
 import TimeRangeSelector from '@/components/controls/TimeRangeSelector';
 import DataTable from '@/components/ui/DataTable';
