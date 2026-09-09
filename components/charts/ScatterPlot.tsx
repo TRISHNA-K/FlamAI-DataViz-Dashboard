@@ -1,11 +1,19 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useData } from '@/components/providers/DataProvider';
 import { useChartRenderer } from '@/hooks/useChartRenderer';
 import { setupHiDPICanvas, createLinearScale, SpatialGridIndex, CATEGORY_COLORS, CATEGORY_RGBA, formatTimeTick } from '@/lib/canvasUtils';
 import { DataPoint } from '@/lib/types';
-import { Crosshair, RotateCcw } from 'lucide-react';
+import { Crosshair, RotateCcw, BoxSelect, X, Sparkles } from 'lucide-react';
+
+interface ClusterStats {
+  count: number;
+  meanValue: number;
+  anomalyCount: number;
+  anomalyPercentage: number;
+  categoryDistribution: Record<string, number>;
+}
 
 interface ScatterPlotProps {
   data?: DataPoint[];
@@ -31,6 +39,13 @@ function ScatterPlot({ data }: ScatterPlotProps) {
     x: number;
     y: number;
   } | null>(null);
+
+  // Cluster / Drag-Box Selection State
+  const [isBoxSelectMode, setIsBoxSelectMode] = useState(false);
+  const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
+  const [selectedCluster, setSelectedCluster] = useState<ClusterStats | null>(null);
+  const isSelectingRef = useRef(false);
+  const selectionStartRef = useRef<{ x: number; y: number } | null>(null);
 
   // Ref tracking current hovered point to avoid redundant React state updates on mouse moves
   const hoveredPointRef = useRef<{
@@ -239,6 +254,24 @@ function ScatterPlot({ data }: ScatterPlotProps) {
 
     ctx.restore(); // Restore clipping
 
+    // Draw Box Selection
+    if (selectionBox) {
+      const bx = Math.min(selectionBox.startX, selectionBox.endX);
+      const by = Math.min(selectionBox.startY, selectionBox.endY);
+      const bw = Math.abs(selectionBox.endX - selectionBox.startX);
+      const bh = Math.abs(selectionBox.endY - selectionBox.startY);
+
+      ctx.save();
+      ctx.fillStyle = 'rgba(6, 182, 212, 0.18)';
+      ctx.fillRect(bx, by, bw, bh);
+
+      ctx.strokeStyle = '#22d3ee';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.strokeRect(bx, by, bw, bh);
+      ctx.restore();
+    }
+
     // X-Axis Time Ticks
     const timeSpan = maxTime - minTime;
     const xTicks = Math.max(3, Math.floor(plotWidth / 120));
@@ -264,8 +297,105 @@ function ScatterPlot({ data }: ScatterPlotProps) {
     maxValue,
     isHovered,
     mousePos,
+    selectionBox,
     startRenderMeasure,
     endRenderMeasure,
+  ]);
+
+  const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (isBoxSelectMode && e.button === 0) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      isSelectingRef.current = true;
+      selectionStartRef.current = { x, y };
+      setSelectionBox({ startX: x, startY: y, endX: x, endY: y });
+      return;
+    }
+    eventHandlers.onMouseDown(e);
+  }, [isBoxSelectMode, eventHandlers]);
+
+  const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (isBoxSelectMode && isSelectingRef.current && selectionStartRef.current) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      setSelectionBox({
+        startX: selectionStartRef.current.x,
+        startY: selectionStartRef.current.y,
+        endX: x,
+        endY: y,
+      });
+      return;
+    }
+    eventHandlers.onMouseMove(e);
+  }, [isBoxSelectMode, eventHandlers]);
+
+  const handleCanvasMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (isBoxSelectMode && isSelectingRef.current && selectionStartRef.current && selectionBox) {
+      isSelectingRef.current = false;
+      const x1 = Math.min(selectionBox.startX, selectionBox.endX);
+      const x2 = Math.max(selectionBox.startX, selectionBox.endX);
+      const y1 = Math.min(selectionBox.startY, selectionBox.endY);
+      const y2 = Math.max(selectionBox.startY, selectionBox.endY);
+
+      if (Math.abs(x2 - x1) > 10 && Math.abs(y2 - y1) > 10) {
+        const padding = { top: 20, right: 25, bottom: 35, left: 55 };
+        const plotWidth = dimensions.width - padding.left - padding.right;
+        const plotHeight = dimensions.height - padding.top - padding.bottom;
+        const scaleXRaw = createLinearScale(minTime, maxTime, padding.left, padding.left + plotWidth);
+        const scaleY = createLinearScale(minValue, maxValue, padding.top + plotHeight, padding.top);
+        const scaleX = (val: number) => padding.left + (scaleXRaw(val) - padding.left) * transform.zoom + transform.panX;
+
+        const matched: DataPoint[] = [];
+        let totalVal = 0;
+        let anomalyCount = 0;
+        const catMap: Record<string, number> = {};
+
+        for (let i = 0; i < renderedData.length; i++) {
+          const pt = renderedData[i];
+          const px = scaleX(pt.timestamp);
+          const py = scaleY(pt.value);
+
+          if (px >= x1 && px <= x2 && py >= y1 && py <= y2) {
+            matched.push(pt);
+            totalVal += pt.value;
+            if (pt.isAnomaly) anomalyCount++;
+            catMap[pt.category] = (catMap[pt.category] || 0) + 1;
+          }
+        }
+
+        if (matched.length > 0) {
+          setSelectedCluster({
+            count: matched.length,
+            meanValue: Math.round((totalVal / matched.length) * 100) / 100,
+            anomalyCount,
+            anomalyPercentage: Math.round((anomalyCount / matched.length) * 1000) / 10,
+            categoryDistribution: catMap,
+          });
+        } else {
+          setSelectedCluster(null);
+          setSelectionBox(null);
+        }
+      } else {
+        setSelectionBox(null);
+        setSelectedCluster(null);
+      }
+      selectionStartRef.current = null;
+      return;
+    }
+    eventHandlers.onMouseUp();
+  }, [
+    isBoxSelectMode,
+    selectionBox,
+    dimensions,
+    minTime,
+    maxTime,
+    minValue,
+    maxValue,
+    transform,
+    renderedData,
+    eventHandlers,
   ]);
 
   return (
@@ -283,28 +413,56 @@ function ScatterPlot({ data }: ScatterPlotProps) {
           </div>
         </div>
 
-        {transform.zoom > 1 && (
+        <div className="flex items-center gap-2">
           <button
-            onClick={resetTransform}
-            className="flex items-center gap-1 px-2 py-1 text-xs text-slate-300 bg-surface-elevated hover:bg-slate-700 border border-surface-border rounded transition-colors"
+            onClick={() => {
+              const nextMode = !isBoxSelectMode;
+              setIsBoxSelectMode(nextMode);
+              if (!nextMode) {
+                setSelectionBox(null);
+                setSelectedCluster(null);
+              }
+            }}
+            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg border transition-all ${
+              isBoxSelectMode
+                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500 font-semibold'
+                : 'bg-surface-elevated hover:bg-slate-800 text-slate-300 border-surface-border'
+            }`}
+            title="Toggle Drag Box Cluster Selection"
           >
-            <RotateCcw className="w-3 h-3" />
-            <span>Reset {transform.zoom.toFixed(1)}x</span>
+            <BoxSelect className="w-3.5 h-3.5" />
+            <span>{isBoxSelectMode ? 'Selecting Area' : 'Box Select'}</span>
           </button>
-        )}
+
+          {transform.zoom > 1 && (
+            <button
+              onClick={resetTransform}
+              className="flex items-center gap-1 px-2 py-1 text-xs text-slate-300 bg-surface-elevated hover:bg-slate-700 border border-surface-border rounded transition-colors"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Reset {transform.zoom.toFixed(1)}x</span>
+            </button>
+          )}
+        </div>
       </div>
 
       <div
         ref={containerRef}
-        className="relative w-full h-[280px] overflow-hidden cursor-crosshair select-none"
+        className={`relative w-full h-[280px] overflow-hidden select-none ${
+          isBoxSelectMode ? 'cursor-crosshair' : 'cursor-default'
+        }`}
       >
         <canvas
           ref={canvasRef}
           {...eventHandlers}
+          onMouseDown={handleCanvasMouseDown}
+          onMouseMove={handleCanvasMouseMove}
+          onMouseUp={handleCanvasMouseUp}
           className="absolute inset-0 block w-full h-full"
         />
 
-        {hoveredPoint && (
+        {/* Hover Tooltip */}
+        {hoveredPoint && !isSelectingRef.current && (
           <div
             className="pointer-events-none absolute z-20 px-3 py-2 text-xs font-mono bg-slate-950/95 text-slate-100 rounded-lg shadow-2xl border border-cyan-500/50 backdrop-blur-md -translate-x-1/2 -translate-y-full min-w-[180px]"
             style={{
@@ -336,6 +494,69 @@ function ScatterPlot({ data }: ScatterPlotProps) {
             </div>
           </div>
         )}
+
+        {/* Cluster Selection Statistics Overlay */}
+        {selectedCluster && (
+          <div className="absolute top-3 right-3 z-20 p-3 bg-slate-950/95 border border-cyan-500/60 rounded-xl shadow-2xl backdrop-blur-md font-mono text-xs max-w-[270px] animate-in fade-in slide-in-from-top-2 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-1.5 mb-2">
+              <div className="flex items-center gap-1.5 font-bold text-cyan-300">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Cluster Analytics</span>
+              </div>
+              <button
+                onClick={() => {
+                  setSelectedCluster(null);
+                  setSelectionBox(null);
+                }}
+                className="text-slate-400 hover:text-white p-0.5 rounded transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-[11px] mb-2">
+              <div>
+                <span className="text-slate-400">Selected:</span>
+                <div className="text-sm font-bold text-white">
+                  {selectedCluster.count.toLocaleString()} pts
+                </div>
+              </div>
+              <div>
+                <span className="text-slate-400">Mean:</span>
+                <div className="text-sm font-bold text-cyan-300">
+                  {selectedCluster.meanValue}
+                </div>
+              </div>
+              <div>
+                <span className="text-slate-400">Anomalies:</span>
+                <div className="text-sm font-bold text-rose-400">
+                  {selectedCluster.anomalyCount} ({selectedCluster.anomalyPercentage}%)
+                </div>
+              </div>
+              <div>
+                <span className="text-slate-400">Density:</span>
+                <div className="text-sm font-bold text-emerald-400">
+                  {Math.round((selectedCluster.count / Math.max(1, renderedData.length)) * 100)}%
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-1 pt-1.5 border-t border-slate-800/80 text-[10px]">
+              {Object.entries(selectedCluster.categoryDistribution).map(([cat, count]) => (
+                <span
+                  key={cat}
+                  className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 flex items-center gap-1"
+                >
+                  <span
+                    className="w-1.5 h-1.5 rounded-full"
+                    style={{ backgroundColor: CATEGORY_COLORS[cat as keyof typeof CATEGORY_COLORS] || '#38bdf8' }}
+                  />
+                  {cat}: {count}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 mt-1 border-t border-surface-border/40 font-mono">
@@ -351,7 +572,9 @@ function ScatterPlot({ data }: ScatterPlotProps) {
             Anomaly
           </span>
         </div>
-        <span className="text-slate-500">Sub-millisecond hover search</span>
+        <span className="text-slate-500">
+          {isBoxSelectMode ? 'Drag on canvas to box-select cluster' : 'Sub-millisecond hover search • Click Box Select to analyze clusters'}
+        </span>
       </div>
     </div>
   );

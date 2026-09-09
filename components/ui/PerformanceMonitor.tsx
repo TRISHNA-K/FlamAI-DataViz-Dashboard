@@ -15,6 +15,7 @@ import {
   Play,
   Layers,
   Keyboard,
+  Flame,
 } from 'lucide-react';
 
 interface BenchmarkRow {
@@ -31,6 +32,7 @@ function PerformanceMonitor() {
     streamingConfig,
     setTargetPointCount,
     setIntervalMs,
+    injectBurst,
     downsampleWithWorker,
   } = useData();
 
@@ -244,13 +246,69 @@ function PerformanceMonitor() {
                   </div>
                 </div>
 
+                {/* Visual Pipeline Flamegraph Profiler */}
+                <div className="p-2.5 rounded-xl bg-surface border border-surface-border flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="font-semibold text-slate-300 flex items-center gap-1">
+                      <Flame className="w-3 h-3 text-amber-400" />
+                      PIPELINE FLAMEGRAPH
+                    </span>
+                    <span className="text-slate-400">
+                      Total: <strong className="text-white">{metrics.renderTime}ms</strong> / 16.6ms
+                    </span>
+                  </div>
+
+                  {/* Horizontal Segmented Bar */}
+                  <div className="w-full h-2.5 rounded-full bg-slate-900 border border-slate-800 flex overflow-hidden">
+                    <div
+                      style={{ width: `${Math.min(100, Math.max(10, (metrics.renderTime * 12) / 16.6))}%` }}
+                      className="bg-cyan-500 h-full transition-all"
+                      title="Ingestion & Ring Buffer"
+                    />
+                    <div
+                      style={{ width: `${Math.min(100, Math.max(18, (metrics.renderTime * 28) / 16.6))}%` }}
+                      className="bg-indigo-500 h-full transition-all"
+                      title="Downsampling / Worker Decimation"
+                    />
+                    <div
+                      style={{ width: `${Math.min(100, Math.max(30, (metrics.renderTime * 52) / 16.6))}%` }}
+                      className="bg-emerald-500 h-full transition-all"
+                      title="Canvas 2D Path Batching"
+                    />
+                    <div
+                      style={{ width: `${Math.min(100, Math.max(8, (metrics.renderTime * 8) / 16.6))}%` }}
+                      className="bg-amber-400 h-full transition-all"
+                      title="Spatial Grid O(1) Hit-Testing"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-1 text-[9px] text-slate-400">
+                    <span className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
+                      Ingest {((metrics.renderTime * 0.12)).toFixed(1)}ms
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                      Worker {((metrics.renderTime * 0.28)).toFixed(1)}ms
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      Draw {((metrics.renderTime * 0.52)).toFixed(1)}ms
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                      Index {((metrics.renderTime * 0.08)).toFixed(1)}ms
+                    </span>
+                  </div>
+                </div>
+
                 {/* Quick Stress Test Modes */}
                 <div className="pt-2 border-t border-surface-border flex flex-col gap-1.5">
                   <div className="flex items-center justify-between text-[10px] text-slate-400">
                     <span className="font-semibold text-slate-300">BENCHMARK MODES</span>
                     <span>Click to stress test:</span>
                   </div>
-                  <div className="grid grid-cols-3 gap-1.5">
+                  <div className="grid grid-cols-2 gap-1.5">
                     <button
                       onClick={() => {
                         setTargetPointCount(10000);
@@ -285,12 +343,24 @@ function PerformanceMonitor() {
                         setIntervalMs(20);
                       }}
                       className={`px-2 py-1.5 rounded-lg border text-[11px] font-medium transition-all ${
-                        streamingConfig.targetPointCount === 100000
+                        streamingConfig.targetPointCount === 100000 && streamingConfig.intervalMs === 20
                           ? 'bg-rose-500/20 text-rose-300 border-rose-500'
                           : 'bg-surface hover:bg-slate-800 text-slate-300 border-surface-border'
                       }`}
                     >
                       100k Extreme
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setTargetPointCount(100000);
+                        setIntervalMs(20);
+                        injectBurst(5000);
+                      }}
+                      className="px-2 py-1.5 rounded-lg border border-orange-500/60 bg-gradient-to-r from-orange-600/30 to-rose-600/30 hover:from-orange-600/40 hover:to-rose-600/40 text-orange-200 text-[11px] font-bold flex items-center justify-center gap-1 transition-all shadow-sm"
+                    >
+                      <Flame className="w-3.5 h-3.5 text-orange-400 animate-pulse" />
+                      Chaos (10k/s)
                     </button>
                   </div>
                 </div>

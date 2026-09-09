@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useData } from '@/components/providers/DataProvider';
 import { useChartRenderer } from '@/hooks/useChartRenderer';
 import { setupHiDPICanvas, getHeatmapColor, formatTimeTick, formatTime24h } from '@/lib/canvasUtils';
-import { Grid } from 'lucide-react';
+import { Grid, X, Filter, Activity, Clock, Layers } from 'lucide-react';
 import { CategoryType, DataPoint } from '@/lib/types';
 
 const CATEGORIES: CategoryType[] = ['Server A', 'Server B', 'Server C', 'Server D'];
@@ -27,7 +27,7 @@ interface HeatmapProps {
 function Heatmap({ data }: HeatmapProps) {
   const context = useData();
   const renderedData = data || context.renderedData;
-  const { startRenderMeasure, endRenderMeasure } = context;
+  const { startRenderMeasure, endRenderMeasure, setFilter } = context;
   const {
     canvasRef,
     containerRef,
@@ -38,6 +38,15 @@ function Heatmap({ data }: HeatmapProps) {
   } = useChartRenderer();
 
   const [hoveredCell, setHoveredCell] = useState<{
+    cell: HeatmapGridCell;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  const [selectedCell, setSelectedCell] = useState<HeatmapGridCell | null>(null);
+
+  // Ref tracking hovered cell to eliminate 120-240Hz React state update cascades
+  const hoveredCellRef = useRef<{
     cell: HeatmapGridCell;
     x: number;
     y: number;
@@ -191,7 +200,16 @@ function Heatmap({ data }: HeatmapProps) {
       }
     }
 
-    setHoveredCell(hovered);
+    const prev = hoveredCellRef.current;
+    const changed =
+      (!prev && hovered) ||
+      (prev && !hovered) ||
+      (prev && hovered && (prev.cell.xIdx !== hovered.cell.xIdx || prev.cell.yIdx !== hovered.cell.yIdx));
+
+    if (changed) {
+      hoveredCellRef.current = hovered;
+      setHoveredCell(hovered);
+    }
 
     // Draw Y-Axis Labels (Server Categories)
     ctx.fillStyle = '#94a3b8';
@@ -217,6 +235,12 @@ function Heatmap({ data }: HeatmapProps) {
 
     endRenderMeasure();
   }, [matrix, dimensions, isHovered, mousePos, timeSpan, startRenderMeasure, endRenderMeasure]);
+
+  const handleCanvasClick = useCallback(() => {
+    if (hoveredCellRef.current) {
+      setSelectedCell(hoveredCellRef.current.cell);
+    }
+  }, []);
 
   return (
     <div className="relative flex flex-col bg-surface border border-surface-border rounded-xl p-4 shadow-lg">
@@ -248,6 +272,7 @@ function Heatmap({ data }: HeatmapProps) {
         <canvas
           ref={canvasRef}
           {...eventHandlers}
+          onClick={handleCanvasClick}
           className="absolute inset-0 block w-full h-full"
         />
 
@@ -273,11 +298,101 @@ function Heatmap({ data }: HeatmapProps) {
             </div>
           </div>
         )}
+
+        {/* Dynamic Drill-Down Inspection Modal */}
+        {selectedCell && (
+          <div className="absolute inset-0 z-30 bg-slate-950/80 backdrop-blur-sm rounded-xl flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-amber-500/50 rounded-xl p-4 shadow-2xl max-w-sm w-full font-mono text-xs flex flex-col gap-3 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+                  <span className="font-bold text-white text-sm">
+                    {selectedCell.category} Drill-Down
+                  </span>
+                </div>
+                <button
+                  onClick={() => setSelectedCell(null)}
+                  className="text-slate-400 hover:text-white p-1 rounded transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div className="p-2 rounded-lg bg-surface border border-surface-border">
+                  <div className="text-slate-400">Mean Value</div>
+                  <div className="text-base font-bold text-amber-300 mt-0.5">
+                    {selectedCell.avgValue} ops
+                  </div>
+                </div>
+                <div className="p-2 rounded-lg bg-surface border border-surface-border">
+                  <div className="text-slate-400">Sample Count</div>
+                  <div className="text-base font-bold text-white mt-0.5">
+                    {selectedCell.count.toLocaleString()} pts
+                  </div>
+                </div>
+                <div className="p-2 rounded-lg bg-surface border border-surface-border">
+                  <div className="text-slate-400">Heat Index</div>
+                  <div className="text-base font-bold text-rose-400 mt-0.5">
+                    {Math.round(selectedCell.intensity * 100)}%
+                  </div>
+                </div>
+                <div className="p-2 rounded-lg bg-surface border border-surface-border">
+                  <div className="text-slate-400">Time Window</div>
+                  <div className="text-[10px] text-slate-300 mt-1 font-sans">
+                    {formatTime24h(selectedCell.timeStart)} - {formatTime24h(selectedCell.timeEnd)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-2 rounded-lg bg-slate-950/70 border border-slate-800 text-[11px]">
+                <span className="text-slate-400">Status Assessment: </span>
+                <span
+                  className={`font-semibold ${
+                    selectedCell.intensity > 0.75
+                      ? 'text-rose-400'
+                      : selectedCell.intensity > 0.4
+                      ? 'text-amber-400'
+                      : 'text-emerald-400'
+                  }`}
+                >
+                  {selectedCell.intensity > 0.75
+                    ? 'High Concurrency Hotspot'
+                    : selectedCell.intensity > 0.4
+                    ? 'Elevated Traffic'
+                    : 'Normal Baseline'}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1 border-t border-slate-800">
+                <button
+                  onClick={() => {
+                    setFilter((prev) => ({
+                      ...prev,
+                      categories: [selectedCell.category],
+                    }));
+                    setSelectedCell(null);
+                  }}
+                  className="flex-1 py-1.5 px-3 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <Filter className="w-3.5 h-3.5" />
+                  Isolate {selectedCell.category}
+                </button>
+                <button
+                  onClick={() => setSelectedCell(null)}
+                  className="py-1.5 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 mt-1 border-t border-surface-border/40 font-mono">
         <span className="text-amber-400">● Dynamic Heat Matrix (24×4)</span>
-        <span className="text-slate-500">Hover cell to inspect server activity slice</span>
+        <span className="text-slate-400">Hover for quick metrics • Click cell for node drill-down</span>
       </div>
     </div>
   );

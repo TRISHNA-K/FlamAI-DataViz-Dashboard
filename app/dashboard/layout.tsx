@@ -1,5 +1,6 @@
 import React from 'react';
-import { Activity, ShieldCheck, Cpu, Terminal } from 'lucide-react';
+import Link from 'next/link';
+import { Activity, ShieldCheck, Cpu, Terminal, Gauge } from 'lucide-react';
 
 export default function DashboardLayout({
   children,
@@ -29,8 +30,16 @@ export default function DashboardLayout({
           </div>
         </div>
 
-        {/* Status Indicators */}
-        <div className="flex items-center gap-4 text-xs font-mono">
+        {/* Status Indicators & Navigation */}
+        <div className="flex items-center gap-3 text-xs font-mono">
+          <Link
+            href="/dashboard/benchmark"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-sky-300 transition-colors"
+          >
+            <Gauge className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Benchmark Suite</span>
+          </Link>
+
           <div className="hidden md:flex items-center gap-2 px-2.5 py-1 rounded-md bg-surface-elevated border border-surface-border text-slate-300">
             <Cpu className="w-3.5 h-3.5 text-sky-400" />
             <span>Worker: Active</span>

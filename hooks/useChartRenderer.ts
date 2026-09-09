@@ -79,22 +79,38 @@ export function useChartRenderer() {
     lastMousePosRef.current = { x: e.clientX, y: e.clientY };
   }, []);
 
+  const rafMouseRef = useRef<number | null>(null);
+  const pendingMousePosRef = useRef<{ x: number; y: number } | null>(null);
+  const pendingDeltaXRef = useRef<number>(0);
+
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    setMousePos({ x: mouseX, y: mouseY });
-    setIsHovered(true);
+    pendingMousePosRef.current = { x: mouseX, y: mouseY };
 
     if (isDraggingRef.current) {
-      const deltaX = e.clientX - lastMousePosRef.current.x;
+      pendingDeltaXRef.current += e.clientX - lastMousePosRef.current.x;
       lastMousePosRef.current = { x: e.clientX, y: e.clientY };
+    }
 
-      setTransform((prev) => ({
-        ...prev,
-        panX: prev.panX + deltaX,
-      }));
+    if (rafMouseRef.current === null) {
+      rafMouseRef.current = requestAnimationFrame(() => {
+        rafMouseRef.current = null;
+        if (pendingMousePosRef.current) {
+          setMousePos(pendingMousePosRef.current);
+          setIsHovered(true);
+        }
+        if (pendingDeltaXRef.current !== 0) {
+          const delta = pendingDeltaXRef.current;
+          pendingDeltaXRef.current = 0;
+          setTransform((prev) => ({
+            ...prev,
+            panX: prev.panX + delta,
+          }));
+        }
+      });
     }
   }, []);
 
@@ -106,6 +122,19 @@ export function useChartRenderer() {
     isDraggingRef.current = false;
     setIsHovered(false);
     setMousePos(null);
+    if (rafMouseRef.current !== null) {
+      cancelAnimationFrame(rafMouseRef.current);
+      rafMouseRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (rafMouseRef.current !== null) {
+        cancelAnimationFrame(rafMouseRef.current);
+        rafMouseRef.current = null;
+      }
+    };
   }, []);
 
   const handleDoubleClick = useCallback(() => {

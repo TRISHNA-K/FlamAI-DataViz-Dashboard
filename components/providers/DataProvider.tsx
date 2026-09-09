@@ -144,11 +144,25 @@ export function DataProvider({ children, initialData }: DataProviderProps) {
     window.history.replaceState(null, '', newUrl);
   }, [timeRange.preset, aggregation, filter.categories, filter.showAnomaliesOnly]);
 
-  // Calculate filtered data
+  // Calculate filtered data with O(1) fast-path for standard telemetry flow
   const filteredData = useMemo(() => {
     if (allData.length === 0) return [];
 
-    const selectedCategories = new Set(filter.categories);
+    const isAllCategories = filter.categories.length === 4;
+    const isFullValueRange = filter.minValue <= 0 && filter.maxValue >= 1000;
+    const isAllAnomalies = !filter.showAnomaliesOnly;
+    const isNoSearch = !filter.searchQuery.trim();
+    const isAllTime = timeRange.preset === 'all';
+
+    // Fast-path: When default filters are active, completely skip iterating 100k items!
+    if (isAllCategories && isFullValueRange && isAllAnomalies && isNoSearch && isAllTime) {
+      return allData;
+    }
+
+    const allowA = filter.categories.includes('Server A');
+    const allowB = filter.categories.includes('Server B');
+    const allowC = filter.categories.includes('Server C');
+    const allowD = filter.categories.includes('Server D');
     const minVal = filter.minValue;
     const maxVal = filter.maxValue;
     const anomaliesOnly = filter.showAnomaliesOnly;
@@ -158,7 +172,7 @@ export function DataProvider({ children, initialData }: DataProviderProps) {
     let startTime = 0;
     let endTime = Infinity;
 
-    if (timeRange.preset !== 'all') {
+    if (!isAllTime) {
       const latestTs = allData[allData.length - 1].timestamp;
       let durationMs = 60 * 1000;
       if (timeRange.preset === '5m') durationMs = 5 * 60 * 1000;
@@ -174,21 +188,32 @@ export function DataProvider({ children, initialData }: DataProviderProps) {
       }
     }
 
-    return allData.filter((pt) => {
-      // Time check
-      if (pt.timestamp < startTime || pt.timestamp > endTime) return false;
-      // Category check
-      if (!selectedCategories.has(pt.category)) return false;
-      // Value range check
-      if (pt.value < minVal || pt.value > maxVal) return false;
-      // Anomaly check
-      if (anomaliesOnly && !pt.isAnomaly) return false;
-      // Search query check
-      if (search && !pt.id.toLowerCase().includes(search) && !pt.category.toLowerCase().includes(search)) {
-        return false;
+    const result: DataPoint[] = [];
+    for (let i = 0; i < allData.length; i++) {
+      const pt = allData[i];
+      if (pt.timestamp < startTime || pt.timestamp > endTime) continue;
+
+      // Fast category branch
+      if (pt.category === 'Server A') {
+        if (!allowA) continue;
+      } else if (pt.category === 'Server B') {
+        if (!allowB) continue;
+      } else if (pt.category === 'Server C') {
+        if (!allowC) continue;
+      } else if (pt.category === 'Server D') {
+        if (!allowD) continue;
       }
-      return true;
-    });
+
+      if (pt.value < minVal || pt.value > maxVal) continue;
+      if (anomaliesOnly && !pt.isAnomaly) continue;
+      if (search && !pt.id.toLowerCase().includes(search) && !pt.category.toLowerCase().includes(search)) {
+        continue;
+      }
+
+      result.push(pt);
+    }
+
+    return result;
   }, [allData, filter, timeRange]);
 
   // Web Worker assisted downsampling state for heavy datasets (> 3000 pts)

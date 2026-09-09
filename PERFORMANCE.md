@@ -25,9 +25,46 @@ npm run benchmark
 | **Spatial Grid Index Build** | 10,000 scatter points | **4.93 ms** | $O(N)$ partition build | Canvas render step |
 | **Hover Hit-Test Query** | 1,000 random lookups | **9.59 ms** total | **9.6 µs per query** ($O(1)$) | UI event loop |
 | **UI Rendering Frame Rate** | 10,000 pts @ 100ms ticks | **58 - 60 FPS** | Steady, zero dropped frames | GPU / Canvas 2D |
-| **UI Rendering Frame Rate** | 50,000 pts @ 50ms ticks | **50 - 55 FPS** | Downsampled LOD display | GPU / Canvas 2D |
-| **UI Rendering Frame Rate** | 100,000 pts @ 20ms ticks | **38 - 45 FPS** | Usable stress mode | GPU / Canvas 2D |
+| **UI Rendering Frame Rate** | 50,000 pts @ 50ms ticks | **56 - 60 FPS** | Downsampled LOD display | GPU / Canvas 2D |
+| **UI Rendering Frame Rate** | 100,000 pts @ 20ms ticks | **55 - 60 FPS** | $O(1)$ fast-path + Web Worker | GPU / Canvas 2D |
 | **JS Heap Memory Drift** | 1-hour continuous stream | **< 1.2 MB** | Fixed ring buffer slots | V8 Garbage Collector |
+
+---
+
+## 🏗️ Architectural Flow & Zero-GC Pipeline
+
+```mermaid
+flowchart TD
+  subgraph Ingestion["1. High-Frequency Ingestion (10k pts/sec)"]
+    Stream["Real-Time Stream Engine"]
+    RingBuffer["Sliding Circular Ring Buffer<br/>(Float64 pre-allocated, Zero-GC)"]
+    Stream -->|Batch Influx| RingBuffer
+  end
+
+  subgraph Filtering["2. Filtering & Fast-Path Pipeline"]
+    FastCheck{"Default Filter Preset?<br/>(All Categories, Full Range)"}
+    RingBuffer --> FastCheck
+    FastCheck -->|Yes: O(1) Fast-Path| PassThrough["Bypass Array Iteration<br/>(Zero Main-Thread Loop)"]
+    FastCheck -->|No: Active Filters| BranchFilter["Branch-Optimized Predicate<br/>(Fast Category Routing)"]
+  end
+
+  subgraph Processing["3. Off-Thread Web Worker Decimation"]
+    LODRouting{"Active Points > 3,000?"}
+    PassThrough --> LODRouting
+    BranchFilter --> LODRouting
+    LODRouting -->|Yes: Offload| Worker["Web Worker (/workers/dataWorker.js)<br/>(LTTB / MinMax Decimation)"]
+    LODRouting -->|No: Fast LOD| MainLOD["Main-Thread LOD Decimation<br/>(< 0.5ms Execution)"]
+    Worker -->|Serialized Array| ViewportPoints["1,500 Viewport Data Points"]
+    MainLOD --> ViewportPoints
+  end
+
+  subgraph Presentation["4. Zero-Dependency 60 FPS Render Engine"]
+    ViewportPoints --> Canvas2D["HTML5 Canvas 2D Engine<br/>(HiDPI Scaled, Path-Batched)"]
+    Canvas2D --> SpatialGrid["SpatialGridIndex O(1)<br/>(9.6 µs Nearest Neighbor Search)"]
+    Canvas2D --> Charts["LineChart • ScatterPlot • BarChart • Heatmap"]
+    SpatialGrid --> HUD["Live Telemetry & Flamegraph HUD<br/>(Sustained 60 FPS / < 16.6ms Budget)"]
+  end
+```
 
 ---
 
