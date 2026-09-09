@@ -55,7 +55,7 @@ All charts are engineered using an optimized **Canvas 2D + SVG hybrid architectu
 - **Scatter Distribution Plot (`ScatterPlot.tsx`)**:
   - Renders **10,000 to 100,000 individual scatter points** simultaneously.
   - Categorical color-coding across 4 server nodes (`Server A`, `Server B`, `Server C`, `Server D`).
-  - **Sub-millisecond ($O(1)$) hover hit-testing** via a custom **Spatial Grid Partitioning Index (`SpatialGridIndex`)** — inspects dense clusters at **9.6 µs per query** with zero frame drops.
+  - **Sub-millisecond ($O(1)$) hover hit-testing** via a custom **Spatial Grid Partitioning Index (`SpatialGridIndex`)** — inspects dense clusters at **~9.6 µs per query** (empirically measured across 1,000 spatial queries via `npm run benchmark`) with zero frame drops.
 - **Time × Node Density Heatmap (`Heatmap.tsx`)**:
   - 2D matrix (24 time buckets × 4 server nodes) visualizes activity density and latency heat.
   - Multi-stop color interpolation (cool blue → cyan → emerald → amber → rose) with interactive cell inspection.

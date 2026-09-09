@@ -32,6 +32,13 @@ function ScatterPlot({ data }: ScatterPlotProps) {
     y: number;
   } | null>(null);
 
+  // Ref tracking current hovered point to avoid redundant React state updates on mouse moves
+  const hoveredPointRef = useRef<{
+    point: DataPoint;
+    x: number;
+    y: number;
+  } | null>(null);
+
   // Maintain Spatial Grid for O(1) hover search
   const spatialIndexRef = useRef<SpatialGridIndex>(new SpatialGridIndex(28));
 
@@ -207,16 +214,27 @@ function ScatterPlot({ data }: ScatterPlotProps) {
         ctx.fillStyle = CATEGORY_COLORS[nearest.point.category] || '#38bdf8';
         ctx.fill();
 
-        setHoveredPoint({
-          point: nearest.point,
-          x: nearest.x,
-          y: nearest.y,
-        });
+        // Avoid unnecessary React state updates: only set state when active hovered point actually changes
+        if (hoveredPointRef.current?.point.id !== nearest.point.id) {
+          const nextHovered = {
+            point: nearest.point,
+            x: nearest.x,
+            y: nearest.y,
+          };
+          hoveredPointRef.current = nextHovered;
+          setHoveredPoint(nextHovered);
+        }
       } else {
-        setHoveredPoint(null);
+        if (hoveredPointRef.current !== null) {
+          hoveredPointRef.current = null;
+          setHoveredPoint(null);
+        }
       }
     } else {
-      setHoveredPoint(null);
+      if (hoveredPointRef.current !== null) {
+        hoveredPointRef.current = null;
+        setHoveredPoint(null);
+      }
     }
 
     ctx.restore(); // Restore clipping

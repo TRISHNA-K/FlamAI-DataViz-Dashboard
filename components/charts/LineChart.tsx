@@ -33,6 +33,14 @@ function LineChart({ data }: LineChartProps) {
     y: number;
   } | null>(null);
 
+  // Ref tracking current hovered point to avoid redundant React state updates on mouse moves
+  const hoveredPointRef = useRef<{
+    timestamp: number;
+    value: number;
+    x: number;
+    y: number;
+  } | null>(null);
+
   // Compute domain bounds
   const { minTime, maxTime, minValue, maxValue } = useMemo(() => {
     if (renderedData.length === 0) {
@@ -248,14 +256,21 @@ function LineChart({ data }: LineChartProps) {
       ctx.fill();
       ctx.stroke();
 
-      setHoveredPoint({
-        timestamp: closest.timestamp,
-        value: closest.value,
-        x: cx,
-        y: cy,
-      });
+      if (hoveredPointRef.current?.timestamp !== closest.timestamp) {
+        const nextH = {
+          timestamp: closest.timestamp,
+          value: closest.value,
+          x: cx,
+          y: cy,
+        };
+        hoveredPointRef.current = nextH;
+        setHoveredPoint(nextH);
+      }
     } else {
-      setHoveredPoint(null);
+      if (hoveredPointRef.current !== null) {
+        hoveredPointRef.current = null;
+        setHoveredPoint(null);
+      }
     }
 
     ctx.restore(); // Restore clipping
