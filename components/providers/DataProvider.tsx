@@ -22,6 +22,7 @@ interface DataContextType {
   filteredData: DataPoint[];
   renderedData: DataPoint[];
   aggregatedData: AggregatedBucket[];
+  downsampleWithWorker: (data: DataPoint[], threshold?: number, algorithm?: 'lttb' | 'minmax') => Promise<DataPoint[]>;
   
   // Streaming & Config
   streamingConfig: StreamingConfig;
@@ -97,6 +98,51 @@ export function DataProvider({ children, initialData }: DataProviderProps) {
     start: 0,
     end: 0,
   });
+
+  // Hydrate initial state from URL query parameters (shareable link state)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const rangeParam = params.get('range');
+    const aggParam = params.get('agg');
+    const nodesParam = params.get('nodes');
+    const anomaliesParam = params.get('anomalies');
+
+    if (rangeParam && ['1m', '5m', '15m', '1h', 'all'].includes(rangeParam)) {
+      setTimeRange({ preset: rangeParam as TimeRangePreset, start: 0, end: 0 });
+    }
+    if (aggParam && ['raw', '1min', '5min', '1hour'].includes(aggParam)) {
+      setAggregation(aggParam as AggregationPeriod);
+    }
+    if (nodesParam) {
+      const validNodes = nodesParam.split(',').filter((n): n is CategoryType =>
+        ['Server A', 'Server B', 'Server C', 'Server D'].includes(n as CategoryType)
+      );
+      if (validNodes.length > 0) {
+        setFilter((prev) => ({ ...prev, categories: validNodes }));
+      }
+    }
+    if (anomaliesParam === 'true') {
+      setFilter((prev) => ({ ...prev, showAnomaliesOnly: true }));
+    }
+  }, [setAggregation]);
+
+  // Synchronize active filters to URL query string without page reloads
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams();
+    if (timeRange.preset !== 'all') params.set('range', timeRange.preset);
+    if (aggregation !== 'raw') params.set('agg', aggregation);
+    if (filter.categories.length < 4) params.set('nodes', filter.categories.join(','));
+    if (filter.showAnomaliesOnly) params.set('anomalies', 'true');
+
+    const queryString = params.toString();
+    const newUrl = queryString
+      ? `${window.location.pathname}?${queryString}`
+      : window.location.pathname;
+
+    window.history.replaceState(null, '', newUrl);
+  }, [timeRange.preset, aggregation, filter.categories, filter.showAnomaliesOnly]);
 
   // Calculate filtered data
   const filteredData = useMemo(() => {
@@ -237,6 +283,7 @@ export function DataProvider({ children, initialData }: DataProviderProps) {
       filteredData,
       renderedData,
       aggregatedData,
+      downsampleWithWorker,
       streamingConfig,
       toggleStreaming,
       setIntervalMs,
@@ -265,6 +312,7 @@ export function DataProvider({ children, initialData }: DataProviderProps) {
       filteredData,
       renderedData,
       aggregatedData,
+      downsampleWithWorker,
       streamingConfig,
       toggleStreaming,
       setIntervalMs,
