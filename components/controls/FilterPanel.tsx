@@ -151,7 +151,7 @@ function FilterPanel() {
             </span>
           </label>
           <div className="flex items-center gap-1">
-            {[5000, 10000, 25000, 50000, 100000].map((size) => (
+            {[10000, 25000, 50000, 100000].map((size) => (
               <button
                 key={size}
                 onClick={() => setTargetPointCount(size)}

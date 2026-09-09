@@ -18,8 +18,8 @@ interface ServerInsightMetric {
 export async function DashboardServerInsights() {
   const startTime = Date.now();
 
-  // Real computation over server-side baseline dataset
-  const samplePoints = generateInitialDataset(5000, 100);
+  // Real computation over server-side baseline dataset (10,000 points)
+  const samplePoints = generateInitialDataset(10000, 100);
   const totalValue = samplePoints.reduce((acc, p) => acc + p.value, 0);
   const avgValue = (totalValue / samplePoints.length).toFixed(1);
   const anomalyCount = samplePoints.filter((p) => p.isAnomaly).length;

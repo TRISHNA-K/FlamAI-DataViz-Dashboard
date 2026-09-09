@@ -150,7 +150,7 @@ function DataTable({ data }: DataTableProps) {
 
   const exportCSV = () => {
     const headers = ['ID', 'Timestamp', 'Date', 'Category', 'Value', 'SecondaryValue', 'Anomaly', 'CPU_Load', 'Latency_ms'];
-    const rows = sortedData.slice(0, 5000).map((pt) => [
+    const rows = sortedData.slice(0, 10000).map((pt) => [
       pt.id,
       pt.timestamp,
       new Date(pt.timestamp).toISOString(),
