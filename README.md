@@ -191,7 +191,7 @@ flowchart TD
 ## ⚖️ Senior Engineering Tradeoffs & Architectural Rationale
 
 ### 1. Why Canvas 2D over SVG or D3.js?
-- **SVG / D3 Overhead**: SVG represents every visualization mark as a distinct DOM node. At 100,000 points, managing 100,000 `<circle>` and `<path>` DOM nodes consumes over 250 MB of memory and overwhelms browser style recalculation, tree layout, and paint compositor stages, collapsing frame rates to **2–5 FPS**.
+- **SVG / D3 Overhead**: SVG represents every visualization mark as a distinct Document Object Model(DOM) node. At 100,000 points, managing 100,000 `<circle>` and `<path>` DOM nodes consumes over 250 MB of memory and overwhelms browser style recalculation, tree layout, and paint compositor stages, collapsing frame rates to **2–5 FPS**.
 - **Canvas 2D Advantage**: Canvas operates as an immediate-mode hardware-accelerated bitmap buffer. Drawing 100,000 batched paths executes directly on the GPU rasterizer in **2.5ms–4.0ms**, completely bypassing the DOM tree and sustaining a fluid **60 FPS**.
 
 ### 2. Why Circular Ring Buffer (`SlidingDataBuffer`) over JavaScript Dynamic Arrays (`push`/`shift`)?
