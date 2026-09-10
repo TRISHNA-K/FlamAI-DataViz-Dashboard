@@ -4,8 +4,10 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useData } from '@/components/providers/DataProvider';
 import { useChartRenderer } from '@/hooks/useChartRenderer';
 import { setupHiDPICanvas, createLinearScale, SpatialGridIndex, CATEGORY_COLORS, CATEGORY_RGBA, formatTimeTick } from '@/lib/canvasUtils';
+import { useOffscreenCanvas } from '@/hooks/useOffscreenCanvas';
+import { blitOffscreenBuffer } from '@/lib/offscreenRenderer';
 import { DataPoint } from '@/lib/types';
-import { Crosshair, RotateCcw, BoxSelect, X, Sparkles } from 'lucide-react';
+import { Crosshair, RotateCcw, BoxSelect, X, Sparkles, Cpu } from 'lucide-react';
 
 interface ClusterStats {
   count: number;
@@ -33,6 +35,8 @@ function ScatterPlot({ data }: ScatterPlotProps) {
     eventHandlers,
     resetTransform,
   } = useChartRenderer();
+
+  const { getOrCreateBuffer, isSupported: isOffscreenSupported } = useOffscreenCanvas();
 
   const [hoveredPoint, setHoveredPoint] = useState<{
     point: DataPoint;
@@ -116,36 +120,42 @@ function ScatterPlot({ data }: ScatterPlotProps) {
       return padding.left + (rawX - padding.left) * transform.zoom + transform.panX;
     };
 
+    const offscreen = getOrCreateBuffer(dimensions.width, dimensions.height);
+    const targetCtx = offscreen ? (offscreen.ctx as unknown as CanvasRenderingContext2D) : ctx;
+    if (offscreen) {
+      targetCtx.clearRect(0, 0, dimensions.width, dimensions.height);
+    }
+
     // Draw Subtle Grid
-    ctx.strokeStyle = 'rgba(51, 65, 85, 0.35)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
+    targetCtx.strokeStyle = 'rgba(51, 65, 85, 0.35)';
+    targetCtx.lineWidth = 1;
+    targetCtx.setLineDash([4, 4]);
 
     const yTicks = 4;
     for (let i = 0; i <= yTicks; i++) {
       const val = minValue + (i / yTicks) * (maxValue - minValue);
       const y = scaleY(val);
-      ctx.beginPath();
-      ctx.moveTo(padding.left, y);
-      ctx.lineTo(padding.left + plotWidth, y);
-      ctx.stroke();
+      targetCtx.beginPath();
+      targetCtx.moveTo(padding.left, y);
+      targetCtx.lineTo(padding.left + plotWidth, y);
+      targetCtx.stroke();
 
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '11px monospace';
-      ctx.textAlign = 'right';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(`${Math.round(val)}`, padding.left - 8, y);
+      targetCtx.fillStyle = '#94a3b8';
+      targetCtx.font = '11px monospace';
+      targetCtx.textAlign = 'right';
+      targetCtx.textBaseline = 'middle';
+      targetCtx.fillText(`${Math.round(val)}`, padding.left - 8, y);
     }
-    ctx.setLineDash([]);
+    targetCtx.setLineDash([]);
 
     // Clear spatial index for new frame
     spatialIndexRef.current.clear();
 
     // Clip plotting area for points
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(padding.left, padding.top, plotWidth, plotHeight);
-    ctx.clip();
+    targetCtx.save();
+    targetCtx.beginPath();
+    targetCtx.rect(padding.left, padding.top, plotWidth, plotHeight);
+    targetCtx.clip();
 
     // Group points by category for batch rendering
     const categoryBatches: Record<string, { x: number; y: number; pt: DataPoint }[]> = {
@@ -180,37 +190,44 @@ function ScatterPlot({ data }: ScatterPlotProps) {
 
     for (const [category, points] of Object.entries(categoryBatches)) {
       if (points.length === 0) continue;
-      ctx.fillStyle = CATEGORY_RGBA[category as keyof typeof CATEGORY_RGBA] || 'rgba(56, 189, 248, 0.7)';
-      ctx.beginPath();
+      targetCtx.fillStyle = CATEGORY_RGBA[category as keyof typeof CATEGORY_RGBA] || 'rgba(56, 189, 248, 0.7)';
+      targetCtx.beginPath();
       for (let i = 0; i < points.length; i++) {
         const p = points[i];
-        ctx.moveTo(p.x + radius, p.y);
-        ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+        targetCtx.moveTo(p.x + radius, p.y);
+        targetCtx.arc(p.x, p.y, radius, 0, Math.PI * 2);
       }
-      ctx.fill();
+      targetCtx.fill();
     }
 
     // Render Anomalies Batch with Crimson Halo
     if (anomalyBatch.length > 0) {
-      ctx.fillStyle = '#f43f5e';
-      ctx.beginPath();
+      targetCtx.fillStyle = '#f43f5e';
+      targetCtx.beginPath();
       for (let i = 0; i < anomalyBatch.length; i++) {
         const p = anomalyBatch[i];
-        ctx.moveTo(p.x + 4.5, p.y);
-        ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
+        targetCtx.moveTo(p.x + 4.5, p.y);
+        targetCtx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
       }
-      ctx.fill();
+      targetCtx.fill();
 
       // Outer ring
-      ctx.strokeStyle = 'rgba(244, 63, 94, 0.6)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
+      targetCtx.strokeStyle = 'rgba(244, 63, 94, 0.6)';
+      targetCtx.lineWidth = 1.5;
+      targetCtx.beginPath();
       for (let i = 0; i < anomalyBatch.length; i++) {
         const p = anomalyBatch[i];
-        ctx.moveTo(p.x + 7, p.y);
-        ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+        targetCtx.moveTo(p.x + 7, p.y);
+        targetCtx.arc(p.x, p.y, 7, 0, Math.PI * 2);
       }
-      ctx.stroke();
+      targetCtx.stroke();
+    }
+
+    targetCtx.restore();
+
+    // Fast-blit pre-rendered OffscreenCanvas to visible canvas (< 0.2ms)
+    if (offscreen) {
+      blitOffscreenBuffer(ctx, offscreen);
     }
 
     // Hit Testing using Spatial Grid O(1)
@@ -414,6 +431,16 @@ function ScatterPlot({ data }: ScatterPlotProps) {
         </div>
 
         <div className="flex items-center gap-2">
+          {isOffscreenSupported && (
+            <span
+              className="hidden sm:inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-mono bg-emerald-950/60 text-emerald-300 border border-emerald-500/30"
+              title="OffscreenCanvas double-buffering hardware blitting enabled"
+            >
+              <Cpu className="w-3 h-3 text-emerald-400" />
+              <span>OffscreenCanvas: GPU Blit</span>
+            </span>
+          )}
+
           <button
             onClick={() => {
               const nextMode = !isBoxSelectMode;

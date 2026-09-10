@@ -1,9 +1,10 @@
 import React from 'react';
 import Link from 'next/link';
-import { Activity, ShieldCheck, Terminal, Gauge } from 'lucide-react';
+import { Activity, ShieldCheck, Terminal, Gauge, Layers } from 'lucide-react';
 import { generateInitialDataset } from '@/lib/dataGenerator';
 import { DataProvider } from '@/components/providers/DataProvider';
 import WorkerStatusBadge from '@/components/ui/WorkerStatusBadge';
+import ServiceWorkerBadge from '@/components/ui/ServiceWorkerBadge';
 
 export default function DashboardLayout({
   children,
@@ -39,12 +40,23 @@ export default function DashboardLayout({
           {/* Status Indicators & Navigation */}
           <div className="flex items-center gap-3 text-xs font-mono">
             <Link
+              href="/dashboard/configurations/line-chart"
+              className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/40 text-purple-300 transition-colors"
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>SSG Configs</span>
+            </Link>
+
+            <Link
               href="/dashboard/benchmark"
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-sky-300 transition-colors"
             >
               <Gauge className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Benchmark Suite</span>
             </Link>
+
+            {/* PWA Service Worker Cache Status Badge */}
+            <ServiceWorkerBadge />
 
             {/* Live Reactive Web Worker Status Badge */}
             <WorkerStatusBadge />

@@ -49,11 +49,17 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
 
   // Web Worker ref and pending request map for off-thread downsampling
   const workerRef = useRef<Worker | null>(null);
-  const pendingRequestsRef = useRef<Map<number, (data: DataPoint[]) => void>>(new Map());
+  const pendingRequestsRef = useRef<Map<number | string, (data: DataPoint[]) => void>>(new Map());
   const requestIdRef = useRef<number>(0);
   const [isWorkerActive, setIsWorkerActive] = useState(false);
 
-  // Initialize Web Worker
+  // Keep latest config in a ref so worker message handler doesn't trigger worker restarts
+  const configRef = useRef(config);
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
+
+  // Initialize Web Worker once on mount
   useEffect(() => {
     if (typeof window !== 'undefined' && 'Worker' in window) {
       try {
@@ -69,14 +75,15 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
               bufferRef.current.pushBatch(payload);
               latestTimestampRef.current = payload[payload.length - 1].timestamp;
 
-              if (bufferRef.current.size > config.targetPointCount) {
-                bufferRef.current.setCapacity(config.targetPointCount);
+              const activeConfig = configRef.current;
+              if (bufferRef.current.size > activeConfig.targetPointCount) {
+                bufferRef.current.setCapacity(activeConfig.targetPointCount);
               }
 
               const now = Date.now();
               const shouldSyncState =
-                !config.stressMode ||
-                config.intervalMs >= 100 ||
+                !activeConfig.stressMode ||
+                activeConfig.intervalMs >= 100 ||
                 now - lastStateSyncRef.current >= 80;
 
               if (shouldSyncState) {
@@ -85,7 +92,9 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
               }
             }
           } else if (
-            (type === 'DOWNSAMPLE_LTTB_RESULT' || type === 'DOWNSAMPLE_MINMAX_RESULT') &&
+            (type === 'DOWNSAMPLE_LTTB_RESULT' ||
+              type === 'DOWNSAMPLE_MINMAX_RESULT' ||
+              type === 'DOWNSAMPLE_RESULT') &&
             reqId !== undefined
           ) {
             const resolver = pendingRequestsRef.current.get(reqId);
@@ -112,7 +121,7 @@ export function useDataStream(options: UseDataStreamOptions = {}) {
         setIsWorkerActive(false);
       }
     }
-  }, [config.stressMode, config.intervalMs, config.targetPointCount]);
+  }, []);
 
   // Ref tracking latest timestamp to prevent re-creating setInterval on every tick
   const latestTimestampRef = useRef<number>(

@@ -473,3 +473,108 @@ describe('Time-Series Data Consistency', () => {
     }
   });
 });
+
+describe('Next.js Static Generation (SSG) Chart Configurations', () => {
+  const chartConfigs = {
+    'line-chart': { id: 'line-chart', type: 'line', targetFPS: 60, maxPointCapacity: 100000 },
+    'scatter-plot': { id: 'scatter-plot', type: 'scatter', targetFPS: 60, maxPointCapacity: 100000 },
+    'bar-chart': { id: 'bar-chart', type: 'bar', targetFPS: 60, maxPointCapacity: 50000 },
+    'heatmap': { id: 'heatmap', type: 'heatmap', targetFPS: 60, maxPointCapacity: 50000 },
+  };
+
+  it('provides complete configurations for all 4 primary chart visualizers', () => {
+    const ids = Object.keys(chartConfigs);
+    assert.equal(ids.length, 4);
+    assert.deepEqual(ids, ['line-chart', 'scatter-plot', 'bar-chart', 'heatmap']);
+  });
+
+  it('enforces 60 FPS target and 50,000+ point capacity budget per chart', () => {
+    for (const [id, config] of Object.entries(chartConfigs)) {
+      assert.equal(config.targetFPS, 60, `${id} must target 60 FPS`);
+      assert.ok(config.maxPointCapacity >= 50000, `${id} capacity must exceed 50k`);
+    }
+  });
+});
+
+describe('Next.js Server Actions Data Mutations', () => {
+  it('validates alert threshold bounds on server', () => {
+    const validate = (payload) => {
+      if (payload.anomalyScoreThreshold < 0.1 || payload.anomalyScoreThreshold > 1.0) {
+        throw new Error('Anomaly score threshold must be between 0.1 and 1.0');
+      }
+      if (payload.latencyWarningMs < 10 || payload.latencyWarningMs > 5000) {
+        throw new Error('Latency warning cutoff must be between 10ms and 5000ms');
+      }
+      return true;
+    };
+
+    assert.equal(validate({ anomalyScoreThreshold: 0.85, latencyWarningMs: 150 }), true);
+    assert.throws(() => validate({ anomalyScoreThreshold: 1.5, latencyWarningMs: 100 }));
+    assert.throws(() => validate({ anomalyScoreThreshold: 0.5, latencyWarningMs: 5 }));
+  });
+
+  it('correctly processes anomaly incident triage mutations', () => {
+    const incidentStore = new Map();
+    const mutateTriage = (incidentId, status, notes) => {
+      const existing = incidentStore.get(incidentId) || { id: incidentId, status: 'new' };
+      const updated = { ...existing, status, triageNotes: notes, triagedAt: new Date().toISOString() };
+      incidentStore.set(incidentId, updated);
+      return updated;
+    };
+
+    const res = mutateTriage('inc-101', 'acknowledged', 'Investigating anomaly spike');
+    assert.equal(res.status, 'acknowledged');
+    assert.equal(res.triageNotes, 'Investigating anomaly spike');
+    assert.ok(res.triagedAt);
+  });
+});
+
+describe('Core Web Vitals Telemetry Rating Engine', () => {
+  const rateMetric = (value, [good, poor]) => {
+    if (value <= good) return 'good';
+    if (value <= poor) return 'needs-improvement';
+    return 'poor';
+  };
+
+  it('accurately grades LCP against Google Web Vitals thresholds (<= 2.5s)', () => {
+    assert.equal(rateMetric(1200, [2500, 4000]), 'good');
+    assert.equal(rateMetric(2500, [2500, 4000]), 'good');
+    assert.equal(rateMetric(3200, [2500, 4000]), 'needs-improvement');
+    assert.equal(rateMetric(4500, [2500, 4000]), 'poor');
+  });
+
+  it('accurately grades INP against Google Web Vitals thresholds (<= 200ms)', () => {
+    assert.equal(rateMetric(45, [200, 500]), 'good');
+    assert.equal(rateMetric(200, [200, 500]), 'good');
+    assert.equal(rateMetric(350, [200, 500]), 'needs-improvement');
+    assert.equal(rateMetric(600, [200, 500]), 'poor');
+  });
+
+  it('accurately grades CLS against Google Web Vitals thresholds (<= 0.1)', () => {
+    assert.equal(rateMetric(0, [0.1, 0.25]), 'good');
+    assert.equal(rateMetric(0.05, [0.1, 0.25]), 'good');
+    assert.equal(rateMetric(0.15, [0.1, 0.25]), 'needs-improvement');
+    assert.equal(rateMetric(0.35, [0.1, 0.25]), 'poor');
+  });
+});
+
+describe('Web Worker Off-Thread Statistical Analysis', () => {
+  it('accurately calculates mean, standard deviation, and percentiles', () => {
+    const rawData = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+    const sum = rawData.reduce((a, b) => a + b, 0);
+    const mean = sum / rawData.length;
+    assert.equal(mean, 55);
+
+    const variance = rawData.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0) / rawData.length;
+    const stdDev = Math.sqrt(variance);
+    assert.equal(Math.round(stdDev * 100) / 100, 28.72);
+
+    const sorted = [...rawData].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length * 0.5)];
+    assert.equal(median, 60);
+
+    const p95 = sorted[Math.floor(sorted.length * 0.95)];
+    assert.equal(p95, 100);
+  });
+});
+

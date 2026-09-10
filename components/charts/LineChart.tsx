@@ -4,7 +4,9 @@ import React, { useRef, useEffect, useMemo, useState } from 'react';
 import { useData } from '@/components/providers/DataProvider';
 import { useChartRenderer } from '@/hooks/useChartRenderer';
 import { setupHiDPICanvas, createLinearScale, formatTimeTick, CATEGORY_COLORS } from '@/lib/canvasUtils';
-import { ZoomIn, ZoomOut, RotateCcw, Activity } from 'lucide-react';
+import { useOffscreenCanvas } from '@/hooks/useOffscreenCanvas';
+import { blitOffscreenBuffer } from '@/lib/offscreenRenderer';
+import { ZoomIn, ZoomOut, RotateCcw, Activity, Cpu } from 'lucide-react';
 import { DataPoint } from '@/lib/types';
 
 interface LineChartProps {
@@ -25,6 +27,8 @@ function LineChart({ data }: LineChartProps) {
     eventHandlers,
     resetTransform,
   } = useChartRenderer();
+
+  const { getOrCreateBuffer, isSupported: isOffscreenSupported } = useOffscreenCanvas();
 
   const [hoveredPoint, setHoveredPoint] = useState<{
     timestamp: number;
@@ -101,81 +105,87 @@ function LineChart({ data }: LineChartProps) {
       return padding.left + (rawX - padding.left) * transform.zoom + transform.panX;
     };
 
+    const offscreen = getOrCreateBuffer(dimensions.width, dimensions.height);
+    const targetCtx = offscreen ? (offscreen.ctx as unknown as CanvasRenderingContext2D) : ctx;
+    if (offscreen) {
+      targetCtx.clearRect(0, 0, dimensions.width, dimensions.height);
+    }
+
     // Clip plotting area so zoomed lines don't bleed into axes
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(padding.left, padding.top, plotWidth, plotHeight);
-    ctx.clip();
+    targetCtx.save();
+    targetCtx.beginPath();
+    targetCtx.rect(padding.left, padding.top, plotWidth, plotHeight);
+    targetCtx.clip();
 
     // 1. Draw Subtle Grid Lines (Horizontal)
     const yTickCount = 5;
-    ctx.strokeStyle = 'rgba(51, 65, 85, 0.4)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
+    targetCtx.strokeStyle = 'rgba(51, 65, 85, 0.4)';
+    targetCtx.lineWidth = 1;
+    targetCtx.setLineDash([4, 4]);
 
     for (let i = 0; i <= yTickCount; i++) {
       const val = minValue + (i / yTickCount) * (maxValue - minValue);
       const y = scaleY(val);
-      ctx.beginPath();
-      ctx.moveTo(padding.left, y);
-      ctx.lineTo(padding.left + plotWidth, y);
-      ctx.stroke();
+      targetCtx.beginPath();
+      targetCtx.moveTo(padding.left, y);
+      targetCtx.lineTo(padding.left + plotWidth, y);
+      targetCtx.stroke();
     }
-    ctx.setLineDash([]); // Reset line dash
+    targetCtx.setLineDash([]); // Reset line dash
 
     // 2. Draw Area Gradient under the line
-    const gradient = ctx.createLinearGradient(0, padding.top, 0, padding.top + plotHeight);
+    const gradient = targetCtx.createLinearGradient(0, padding.top, 0, padding.top + plotHeight);
     gradient.addColorStop(0, 'rgba(56, 189, 248, 0.35)');
     gradient.addColorStop(0.7, 'rgba(56, 189, 248, 0.08)');
     gradient.addColorStop(1, 'rgba(56, 189, 248, 0.0)');
 
-    ctx.beginPath();
+    targetCtx.beginPath();
     const firstX = scaleX(renderedData[0].timestamp);
     const firstY = scaleY(renderedData[0].value);
-    ctx.moveTo(firstX, padding.top + plotHeight);
-    ctx.lineTo(firstX, firstY);
+    targetCtx.moveTo(firstX, padding.top + plotHeight);
+    targetCtx.lineTo(firstX, firstY);
 
     for (let i = 1; i < renderedData.length; i++) {
       const pt = renderedData[i];
       const x = scaleX(pt.timestamp);
       const y = scaleY(pt.value);
-      ctx.lineTo(x, y);
+      targetCtx.lineTo(x, y);
     }
 
     const lastX = scaleX(renderedData[renderedData.length - 1].timestamp);
-    ctx.lineTo(lastX, padding.top + plotHeight);
-    ctx.closePath();
-    ctx.fillStyle = gradient;
-    ctx.fill();
+    targetCtx.lineTo(lastX, padding.top + plotHeight);
+    targetCtx.closePath();
+    targetCtx.fillStyle = gradient;
+    targetCtx.fill();
 
     // 3. Draw Primary Series Line
-    ctx.beginPath();
-    ctx.strokeStyle = '#38bdf8'; // Primary Neon Sky Blue
-    ctx.lineWidth = 2;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
+    targetCtx.beginPath();
+    targetCtx.strokeStyle = '#38bdf8'; // Primary Neon Sky Blue
+    targetCtx.lineWidth = 2;
+    targetCtx.lineJoin = 'round';
+    targetCtx.lineCap = 'round';
 
-    ctx.moveTo(firstX, firstY);
+    targetCtx.moveTo(firstX, firstY);
     for (let i = 1; i < renderedData.length; i++) {
       const pt = renderedData[i];
       const x = scaleX(pt.timestamp);
       const y = scaleY(pt.value);
-      ctx.lineTo(x, y);
+      targetCtx.lineTo(x, y);
     }
-    ctx.stroke();
+    targetCtx.stroke();
 
     // 4. Draw Secondary Metric Line (CPU load / secondaryValue)
-    ctx.beginPath();
-    ctx.strokeStyle = 'rgba(139, 92, 246, 0.55)'; // Violet
-    ctx.lineWidth = 1.5;
+    targetCtx.beginPath();
+    targetCtx.strokeStyle = 'rgba(139, 92, 246, 0.55)'; // Violet
+    targetCtx.lineWidth = 1.5;
     for (let i = 0; i < renderedData.length; i += 2) {
       const pt = renderedData[i];
       const x = scaleX(pt.timestamp);
       const y = scaleY(pt.secondaryValue * 3); // Scaled for comparison
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+      if (i === 0) targetCtx.moveTo(x, y);
+      else targetCtx.lineTo(x, y);
     }
-    ctx.stroke();
+    targetCtx.stroke();
 
     // 5. Draw Anomalies as Crimson Glowing Pulses
     for (let i = 0; i < renderedData.length; i++) {
@@ -184,16 +194,29 @@ function LineChart({ data }: LineChartProps) {
         const ax = scaleX(pt.timestamp);
         const ay = scaleY(pt.value);
         if (ax >= padding.left && ax <= padding.left + plotWidth) {
-          ctx.beginPath();
-          ctx.arc(ax, ay, 4.5, 0, Math.PI * 2);
-          ctx.fillStyle = '#f43f5e';
-          ctx.shadowColor = '#f43f5e';
-          ctx.shadowBlur = 8;
-          ctx.fill();
-          ctx.shadowBlur = 0; // reset
+          targetCtx.beginPath();
+          targetCtx.arc(ax, ay, 4.5, 0, Math.PI * 2);
+          targetCtx.fillStyle = '#f43f5e';
+          targetCtx.shadowColor = '#f43f5e';
+          targetCtx.shadowBlur = 8;
+          targetCtx.fill();
+          targetCtx.shadowBlur = 0; // reset
         }
       }
     }
+
+    targetCtx.restore();
+
+    // Fast-blit pre-rendered OffscreenCanvas to visible canvas (< 0.2ms)
+    if (offscreen) {
+      blitOffscreenBuffer(ctx, offscreen);
+    }
+
+    // Clip for interactive crosshair overlay
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(padding.left, padding.top, plotWidth, plotHeight);
+    ctx.clip();
 
     // 6. Interactive Crosshair & Hover Tooltip Hit Test
     if (isHovered && mousePos && mousePos.x >= padding.left && mousePos.x <= padding.left + plotWidth) {
@@ -336,6 +359,16 @@ function LineChart({ data }: LineChartProps) {
 
         {/* Live metric badge & Zoom controls */}
         <div className="flex items-center gap-3">
+          {isOffscreenSupported && (
+            <span
+              className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950/60 text-emerald-300 border border-emerald-500/30"
+              title="OffscreenCanvas double buffering hardware blitting enabled"
+            >
+              <Cpu className="w-3 h-3 text-emerald-400" />
+              <span>Offscreen</span>
+            </span>
+          )}
+
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-sky-950/60 border border-sky-500/30">
             <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
             <span className="text-xs font-mono font-medium text-sky-300">

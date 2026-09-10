@@ -2,9 +2,42 @@
 
 A high-performance real-time telemetry analytics dashboard engineered with **Next.js 14+ (App Router)**, **React 18**, and **TypeScript**. Built from scratch without external charting dependencies (no D3.js, no Chart.js), it smoothly renders and continuously updates **10,000+ data points at a sustained 60 FPS** on 100ms streaming intervals, while providing interactive zoom, pan, spatial filtering, time aggregations, a 10,000+ row virtualized data table, and a dedicated Web Worker.
 
-![Dashboard Preview](/screenshots/dashboard_preview.svg)
+## Screenshots
+
+### 1. Main Dashboard Overview
+Shows the complete telemetry monitoring dashboard with real-time server metrics, controls, and visualizations.
+
+![Dashboard Overview](public/screenshots/dashboard_preview1.png)
 
 ---
+
+### 2. Real-Time Data Streaming
+Demonstrates live ingestion of 10,000+ telemetry points with dynamic updates and filtering controls.
+
+![Dashboard Overview](public/screenshots/dashboard_preview2.png)
+
+---
+
+### 3. Interactive Visualizations
+Illustrates the Time-Series Chart, Scatter Plot, and zoom/pan interactions powered by Canvas rendering.
+
+![Dashboard Overview](public/screenshots/dashboard_preview3.png)
+
+![Dashboard Overview](public/screenshots/dashboard_preview4.png)
+
+---
+
+### 4. Performance Monitoring HUD
+Displays FPS, frame time, memory usage, dropped frames, and benchmark metrics.
+
+![Dashboard Overview](public/screenshots/dashboard_preview5.png)
+
+---
+
+### 5. Stress Testing & Benchmark Suite
+Shows benchmark modes used to validate rendering performance under different dataset sizes and update rates.
+
+![Dashboard Overview](public/screenshots/dashboard_preview6.png)
 
 ## 🚀 Quick Start
 
@@ -204,11 +237,18 @@ performance-dashboard/
 │   ├── performanceUtils.ts       # LTTB downsampling, MinMax decimation, SlidingDataBuffer
 │   └── types.ts                  # Comprehensive TypeScript interfaces
 ├── public/
-│   ├── screenshots/
-│   │   └── dashboard_preview.svg # Visual dashboard UI mockup
+│   ├── manifest.json             # PWA Web Manifest specification
+│   ├── screenshots/              # Production dashboard preview screenshots
+│   │   ├── dashboard_preview1.png
+│   │   ├── dashboard_preview2.png
+│   │   ├── dashboard_preview3.png
+│   │   ├── dashboard_preview4.png
+│   │   └── dashboard_preview5.png
+│   ├── sw.js                     # PWA Service Worker (Cache-First & Stale-While-Revalidate)
 │   └── workers/
 │       └── dataWorker.js         # Dedicated Web Worker for off-thread processing
 ├── scripts/
+│   ├── analyzeBundle.mjs         # Bundle analyzer and chunk size report
 │   ├── benchmark.mjs             # Standalone reproducible benchmark test suite
 │   └── test.mjs                  # Automated unit test suite (LTTB, MinMax, Spatial Grid)
 
@@ -254,6 +294,32 @@ performance-dashboard/
    - Hover over points in the Scatter Plot: notice instantaneous tooltip response thanks to the $O(1)$ spatial grid index (**9.6 µs lookup latency**).
 5. **Inspect Virtual Scrolling**:
    - Scroll through the Data Table. Open Chrome DevTools Elements panel to verify that only ~25 `<div>` elements exist in the DOM regardless of whether there are 10,000 or 100,000 rows.
+
+---
+
+## 🎪 Bonus Points Implementation Breakdown
+
+### 1. Advanced Next.js Features
+
+| Feature | Implementation | Source Files |
+| :--- | :--- | :--- |
+| **Streaming UI with Suspense Boundaries** | Granular React Suspense boundaries streaming fleet insights, pre-computed chart configurations, and edge cluster latency via HTTP chunking. | [`app/dashboard/page.tsx`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/app/dashboard/page.tsx), [`components/DashboardServerInsights.tsx`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/components/DashboardServerInsights.tsx), [`components/DashboardChartConfigsStream.tsx`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/components/DashboardChartConfigsStream.tsx), [`components/DashboardClusterEdgeStream.tsx`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/components/DashboardClusterEdgeStream.tsx) |
+| **Server Actions for Data Mutations** | Real server-side mutations updating alert thresholds, incident triage records, and custom chart presets with server validation and cache revalidation (`revalidatePath`). Interactive UI with `useTransition`. | [`app/actions/telemetryActions.ts`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/app/actions/telemetryActions.ts), [`components/controls/ServerActionMutations.tsx`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/components/controls/ServerActionMutations.tsx) |
+| **Route Handlers with Edge Runtime** | Globally distributed V8 isolate route handlers: `/api/data` with HTTP edge caching and `/api/stream` streaming live telemetry Server-Sent Events (SSE) via `ReadableStream`. | [`app/api/data/route.ts`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/app/api/data/route.ts), [`app/api/stream/route.ts`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/app/api/stream/route.ts) |
+| **Middleware for Request Optimization** | Edge middleware setting `Server-Timing` and `X-Response-Time` headers, edge region routing, Web Worker CSP rules, and static asset cache optimization. | [`middleware.ts`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/middleware.ts) |
+| **Static Generation (SSG) for Chart Configurations** | `generateStaticParams()` pre-renders static HTML pages and static JSON endpoints for all 4 chart configurations (`line-chart`, `scatter-plot`, `bar-chart`, `heatmap`) at build time. | [`app/dashboard/configurations/[chartId]/page.tsx`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/app/dashboard/configurations/[chartId]/page.tsx), [`app/api/configurations/[chartId]/route.ts`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/app/api/configurations/[chartId]/route.ts), [`lib/staticChartConfigs.ts`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/lib/staticChartConfigs.ts) |
+
+---
+
+### 2. Performance Extras
+
+| Performance Extra | Implementation | Source Files |
+| :--- | :--- | :--- |
+| **Web Workers for Data Processing** | Off-thread LTTB downsampling, MinMax decimation, synthetic burst generation, statistical percentiles (mean, stddev, P50, P95, P99), and spatial partition indexing. | [`public/workers/dataWorker.js`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/public/workers/dataWorker.js), [`lib/workerTypes.ts`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/lib/workerTypes.ts), [`hooks/useDataStream.ts`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/hooks/useDataStream.ts) |
+| **OffscreenCanvas Background Rendering** | Double-buffered OffscreenCanvas engine pre-rendering static grids and 10k-100k data points into background bitmap buffers, fast-blitting to the visible canvas in < 0.2ms during interactive events. | [`lib/offscreenRenderer.ts`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/lib/offscreenRenderer.ts), [`hooks/useOffscreenCanvas.ts`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/hooks/useOffscreenCanvas.ts), [`components/charts/ScatterPlot.tsx`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/components/charts/ScatterPlot.tsx), [`components/charts/LineChart.tsx`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/components/charts/LineChart.tsx) |
+| **Service Worker for Data Caching** | PWA Service Worker caching static application shell, worker scripts, and static chart configs with Cache-First strategy; Stale-While-Revalidate with offline fallback for telemetry datasets; full PWA Web Manifest. | [`public/sw.js`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/public/sw.js), [`public/manifest.json`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/public/manifest.json), [`hooks/useServiceWorker.ts`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/hooks/useServiceWorker.ts), [`components/ui/ServiceWorkerBadge.tsx`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/components/ui/ServiceWorkerBadge.tsx) |
+| **Bundle Analysis & Optimization** | Tree-shaking for Lucide icons via `optimizePackageImports`, Webpack chunk splitting for chart engines and vendor code, `@next/bundle-analyzer` support, and standalone chunk audit script `npm run analyze`. | [`next.config.js`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/next.config.js), [`scripts/analyzeBundle.mjs`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/scripts/analyzeBundle.mjs), [`package.json`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/package.json) |
+| **Core Web Vitals Optimization** | Real-time `PerformanceObserver` tracking LCP, INP, CLS, FCP, and TTFB against official Google thresholds; live Web Vitals tab in the floating HUD; 0 CLS layout shift architecture. | [`lib/webVitals.ts`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/lib/webVitals.ts), [`hooks/useWebVitals.ts`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/hooks/useWebVitals.ts), [`components/ui/PerformanceMonitor.tsx`](file:///c:/Users/trish/OneDrive/Desktop/FlamAI%20Frontend(R&D)/components/ui/PerformanceMonitor.tsx) |
 
 ---
 

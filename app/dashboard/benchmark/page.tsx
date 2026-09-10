@@ -141,7 +141,12 @@ export default function BenchmarkPage() {
             const tWkStart = performance.now();
 
             worker.onmessage = (e) => {
-              if (e.data.type === 'DOWNSAMPLE_RESULT' && e.data.reqId === reqId) {
+              if (
+                (e.data.type === 'DOWNSAMPLE_MINMAX_RESULT' ||
+                  e.data.type === 'DOWNSAMPLE_RESULT' ||
+                  e.data.type === 'DOWNSAMPLE_LTTB_RESULT') &&
+                e.data.reqId === reqId
+              ) {
                 const total = performance.now() - tWkStart;
                 worker.terminate();
                 resolve(total);
@@ -155,9 +160,11 @@ export default function BenchmarkPage() {
 
             worker.postMessage({
               type: 'DOWNSAMPLE_MINMAX',
-              data: dataset,
-              targetPoints,
-              reqId,
+              payload: {
+                data: dataset,
+                threshold: targetPoints,
+                reqId,
+              },
             });
           });
 

@@ -1,21 +1,30 @@
-// High-Performance Data Processing Worker
-// Handles LTTB downsampling, time-bucket aggregation, and synthetic point generation off-thread.
+// High-Performance Telemetry Data Processing Worker
+// Handles LTTB downsampling, MinMax decimation, statistical analysis,
+// spatial partitioning, and synthetic point generation entirely off the main thread.
 
 self.onmessage = function (e) {
   const { type, payload } = e.data;
 
   switch (type) {
     case 'DOWNSAMPLE_LTTB': {
-      const { data, threshold, reqId } = payload;
+      const p = payload || e.data;
+      const data = p.data || [];
+      const threshold = p.threshold || p.targetPoints || 1500;
+      const reqId = p.reqId;
       const result = lttb(data, threshold);
       self.postMessage({ type: 'DOWNSAMPLE_LTTB_RESULT', payload: result, reqId });
+      self.postMessage({ type: 'DOWNSAMPLE_RESULT', payload: result, reqId });
       break;
     }
 
     case 'DOWNSAMPLE_MINMAX': {
-      const { data, threshold, reqId } = payload;
+      const p = payload || e.data;
+      const data = p.data || [];
+      const threshold = p.threshold || p.targetPoints || 1500;
+      const reqId = p.reqId;
       const result = minMax(data, threshold);
       self.postMessage({ type: 'DOWNSAMPLE_MINMAX_RESULT', payload: result, reqId });
+      self.postMessage({ type: 'DOWNSAMPLE_RESULT', payload: result, reqId });
       break;
     }
 
@@ -33,10 +42,127 @@ self.onmessage = function (e) {
       break;
     }
 
+    case 'COMPUTE_STATISTICS': {
+      const { data, reqId } = payload;
+      const stats = computeStatistics(data);
+      self.postMessage({ type: 'COMPUTE_STATISTICS_RESULT', payload: stats, reqId });
+      break;
+    }
+
+    case 'BUILD_SPATIAL_PARTITIONS': {
+      const { data, cellSize, bounds, reqId } = payload;
+      const partitions = buildSpatialPartitions(data, cellSize, bounds);
+      self.postMessage({ type: 'BUILD_SPATIAL_PARTITIONS_RESULT', payload: partitions, reqId });
+      break;
+    }
+
     default:
       break;
   }
 };
+
+/**
+ * Off-thread computation of telemetry statistics & percentiles (P50, P95, P99).
+ * Avoids main thread sorting and O(N) reductions on 10,000-100,000 items.
+ */
+function computeStatistics(data) {
+  const start = performance.now();
+  const len = data.length;
+  if (len === 0) {
+    return {
+      count: 0,
+      mean: 0,
+      median: 0,
+      stdDev: 0,
+      variance: 0,
+      min: 0,
+      max: 0,
+      p95: 0,
+      p99: 0,
+      anomalyRatio: 0,
+      calculatedInMs: 0,
+    };
+  }
+
+  let sum = 0;
+  let min = data[0].value;
+  let max = data[0].value;
+  let anomalyCount = 0;
+
+  const values = new Float64Array(len);
+
+  for (let i = 0; i < len; i++) {
+    const val = data[i].value;
+    values[i] = val;
+    sum += val;
+    if (val < min) min = val;
+    if (val > max) max = val;
+    if (data[i].isAnomaly) anomalyCount++;
+  }
+
+  const mean = sum / len;
+
+  // Variance & standard deviation pass
+  let varianceSum = 0;
+  for (let i = 0; i < len; i++) {
+    const diff = values[i] - mean;
+    varianceSum += diff * diff;
+  }
+  const variance = varianceSum / len;
+  const stdDev = Math.sqrt(variance);
+
+  // Sort values for exact percentiles
+  values.sort();
+  const median = values[Math.floor(len * 0.5)];
+  const p95 = values[Math.floor(len * 0.95)];
+  const p99 = values[Math.floor(len * 0.99)];
+
+  const calculatedInMs = Math.max(0.1, performance.now() - start);
+
+  return {
+    count: len,
+    mean: Math.round(mean * 100) / 100,
+    median: Math.round(median * 100) / 100,
+    stdDev: Math.round(stdDev * 100) / 100,
+    variance: Math.round(variance * 100) / 100,
+    min: Math.round(min * 100) / 100,
+    max: Math.round(max * 100) / 100,
+    p95: Math.round(p95 * 100) / 100,
+    p99: Math.round(p99 * 100) / 100,
+    anomalyRatio: Math.round((anomalyCount / len) * 10000) / 100,
+    calculatedInMs: Math.round(calculatedInMs * 100) / 100,
+  };
+}
+
+/**
+ * Off-thread Spatial Grid Partition Analyzer
+ */
+function buildSpatialPartitions(data, cellSize, bounds) {
+  const grid = new Map();
+  const len = data.length;
+  const cSize = cellSize || 28;
+
+  for (let i = 0; i < len; i++) {
+    const pt = data[i];
+    const cellX = Math.floor(pt.timestamp / cSize);
+    const cellY = Math.floor(pt.value / cSize);
+    const key = `${cellX}:${cellY}`;
+    grid.set(key, (grid.get(key) || 0) + 1);
+  }
+
+  let maxDensity = 0;
+  let totalDensity = 0;
+  for (const count of grid.values()) {
+    if (count > maxDensity) maxDensity = count;
+    totalDensity += count;
+  }
+
+  return {
+    cellCount: grid.size,
+    maxCellDensity: maxDensity,
+    avgCellDensity: grid.size > 0 ? Math.round((totalDensity / grid.size) * 10) / 10 : 0,
+  };
+}
 
 function minMax(data, threshold) {
   const len = data.length;

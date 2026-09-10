@@ -1,15 +1,15 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import dynamic from 'next/dynamic';
 
-const LineChart = dynamic(() => import('@/components/charts/LineChart'), { ssr: false });
-const ScatterPlot = dynamic(() => import('@/components/charts/ScatterPlot'), { ssr: false });
-const BarChart = dynamic(() => import('@/components/charts/BarChart'), { ssr: false });
-const Heatmap = dynamic(() => import('@/components/charts/Heatmap'), { ssr: false });
+import LineChart from '@/components/charts/LineChart';
+import ScatterPlot from '@/components/charts/ScatterPlot';
+import BarChart from '@/components/charts/BarChart';
+import Heatmap from '@/components/charts/Heatmap';
 
 import FilterPanel from '@/components/controls/FilterPanel';
 import TimeRangeSelector from '@/components/controls/TimeRangeSelector';
+import ServerActionMutations from '@/components/controls/ServerActionMutations';
 import DataTable from '@/components/ui/DataTable';
 import PerformanceMonitor from '@/components/ui/PerformanceMonitor';
 import ChartErrorBoundary from '@/components/ui/ChartErrorBoundary';
@@ -107,6 +107,7 @@ export default function Dashboard() {
       <div className="flex flex-col gap-4">
         <TimeRangeSelector />
         <FilterPanel />
+        <ServerActionMutations />
       </div>
 
       {/* 2x2 Responsive Visualizations Grid wrapped in Suspense & Error Boundaries */}
