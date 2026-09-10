@@ -137,39 +137,51 @@ All charts are engineered using an optimized **Canvas 2D + SVG hybrid architectu
 
 ```mermaid
 flowchart TD
-  subgraph Ingestion["1. High-Frequency Ingestion (10,000 pts/sec)"]
+  subgraph Ingestion["1. High-Frequency Data Ingestion (10,000 pts/sec)"]
     Stream["Real-Time Synthetic / WebSocket Stream"]
-    RingBuffer["Sliding Circular Ring Buffer<br/>(Float64 pre-allocated, Zero-GC)"]
+    RingBuffer["Sliding Circular Ring Buffer<br/>(Pre-allocated Float64Array, Zero-GC)"]
     Stream -->|Batch Influx| RingBuffer
   end
 
-  subgraph Filtering["2. Filtering & Fast-Path Pipeline"]
+  subgraph Filtering["2. Filter Engine & Fast Path"]
     FastCheck{"Default Filter Preset?<br/>(All Categories, Full Range)"}
     RingBuffer --> FastCheck
-    FastCheck -->|Yes: O(1) Fast-Path| PassThrough["Bypass Array Iteration<br/>(Zero Main-Thread Loop)"]
-    FastCheck -->|No: Active Filters| BranchFilter["Branch-Optimized Predicate<br/>(Fast Category Routing)"]
+
+    FastCheck -->|Yes: Zero-Filter Fast Path| PassThrough["Bypass Array Traversal<br/>(O(1) Execution)"]
+    FastCheck -->|No: Active Filters| BranchFilter["Branch-Optimized Predicate Engine<br/>(Fast Category Routing)"]
   end
 
-  subgraph Processing["3. Off-Thread Web Worker Decimation"]
-    LODRouting{"Active Points > 3,000?"}
-    PassThrough --> LODRouting
-    BranchFilter --> LODRouting
-    LODRouting -->|Yes: Offload| Worker["Web Worker (/workers/dataWorker.js)<br/>(LTTB / MinMax Decimation)"]
-    LODRouting -->|No: Fast LOD| MainLOD["Main-Thread LOD Decimation<br/>(< 0.5ms Execution)"]
-    Worker -->|Serialized Array| ViewportPoints["1,500 Viewport Data Points"]
+  subgraph Processing["3. Viewport-Aware Processing"]
+    Viewport["Pan / Zoom Controller<br/>(Visible Range Calculation)"]
+
+    PassThrough --> Viewport
+    BranchFilter --> Viewport
+
+    LODRouting{"Visible Points > 3,000?"}
+    Viewport --> LODRouting
+
+    LODRouting -->|Yes: Offload| Worker["Web Worker<br/>(LTTB / MinMax Decimation)"]
+    LODRouting -->|No: Fast LOD| MainLOD["Main-Thread Decimation<br/>(< 0.5ms Execution)"]
+
+    Worker -->|Transferable Float64Array| ViewportPoints["Viewport-Aware LOD<br/>(~1,500 Visible Points)"]
     MainLOD --> ViewportPoints
   end
 
-  subgraph Presentation["4. Zero-Dependency 60 FPS Render Engine"]
-    ViewportPoints --> Canvas2D["HTML5 Canvas 2D Engine<br/>(HiDPI Scaled, Path-Batched)"]
-    Canvas2D --> SpatialGrid["SpatialGridIndex O(1)<br/>(9.6 µs Nearest Neighbor Search)"]
-    Canvas2D --> Charts["LineChart • ScatterPlot • BarChart • Heatmap"]
-    SpatialGrid --> HUD["Live Telemetry & Flamegraph HUD<br/>(Sustained 60 FPS / < 16.6ms Budget)"]
+  subgraph Rendering["4. Zero-Dependency Render Engine"]
+    ViewportPoints --> Canvas2D["HTML5 Canvas 2D Renderer<br/>(HiDPI Scaled, Path Batched)"]
+
+    Canvas2D --> SpatialGrid["Spatial Grid Index<br/>(Sub-ms Hit Testing)"]
+    Canvas2D --> Charts["Line • Scatter • Bar • Heatmap"]
+
+    SpatialGrid --> HUD["Live Telemetry HUD<br/>(FPS • Frame Time • Memory)"]
+  end
+
+  subgraph UI["5. React UI Layer"]
+    ReactUI["React Controls & Dashboard"]
+    ReactUI --> Viewport
+    ReactUI --> HUD
   end
 ```
-
----
-
 ## ⚖️ Senior Engineering Tradeoffs & Architectural Rationale
 
 ### 1. Why Canvas 2D over SVG or D3.js?
