@@ -1,0 +1,16 @@
+{
+  "name": "Telemetry.Pulse Performance Dashboard",
+  "short_name": "Telemetry Pulse",
+  "description": "High-Performance Telemetry Visualization Engine built with Next.js 14, Web Workers & Canvas 2D",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#0b1120",
+  "theme_color": "#0ea5e9",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ]
+}
