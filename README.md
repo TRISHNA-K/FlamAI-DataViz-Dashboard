@@ -1,6 +1,13 @@
 # ⚡ Performance-Critical Data Visualization Dashboard
 
 A high-performance real-time telemetry analytics dashboard engineered with **Next.js 14+ (App Router)**, **React 18**, and **TypeScript**. Built from scratch without external charting dependencies (no D3.js, no Chart.js), it smoothly renders and continuously updates **10,000+ data points at a sustained 60 FPS** on 100ms streaming intervals, while providing interactive zoom, pan, spatial filtering, time aggregations, a 10,000+ row virtualized data table, and a dedicated Web Worker.
+# FlamAI Data Visualization Dashboard
+
+## Live Demo
+https://flam-ai-data-viz-dashboard.vercel.app
+
+## Repository
+https://github.com/TRISHNA-K/FlamAI-DataViz-Dashboard
 
 ## Screenshots
 
