@@ -83,18 +83,21 @@ export async function DashboardServerInsights() {
           return (
             <div
               key={idx}
-              className="bg-slate-950/40 border border-surface-border/60 rounded-lg p-3 flex flex-col justify-between"
+              className="bg-slate-950/40 border border-surface-border/60 rounded-xl p-5 min-h-[150px] flex flex-col justify-between"
+              
             >
               <div className="flex items-center justify-between text-slate-400 mb-1">
-                <span className="text-xs font-medium truncate">{item.title}</span>
+                <span className="text-sm font-semibold text-slate-300">
+  {item.title}
+</span>
                 <Icon className="w-3.5 h-3.5 text-slate-400" />
               </div>
-              <div className="text-lg font-bold text-white tracking-tight font-mono">
-                {item.value}
-              </div>
-              <div className="text-[10px] text-slate-500 truncate mt-1">
-                {item.subtext}
-              </div>
+             <div className="text-3xl lg:text-4xl font-extrabold text-white tracking-tight leading-none">
+  {item.value}
+</div>
+              <div className="text-xs text-slate-500 mt-2">
+  {item.subtext}
+</div>
             </div>
           );
         })}
@@ -132,5 +135,6 @@ export function DashboardServerInsightsSkeleton() {
     </div>
   );
 }
+
 
 export default DashboardServerInsights;
