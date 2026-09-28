@@ -23,8 +23,8 @@ export default function DashboardLayout({
           <div className="flex items-center gap-3">
             <div className="relative w-12 h-12">
   <Image
-    src="/images/flam_logo.jpg"
-    alt="FLAM AI"
+    src="/flam_logo.jpg"
+    alt="FLAM"
     fill
     priority
     className="object-contain"
